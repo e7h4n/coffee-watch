@@ -5,7 +5,10 @@
 Use the 468 x 466 RGB565 framebuffer with a centered round 466px viewing area.
 Main content is centered at (234,233). Keep text clear of the round edge. The
 bottom action starts at y=354 and retains the same hit area on every page.
-Do not move hit targets during entry animations.
+Do not move hit targets during entry animations. Connect scale is vertically
+centered at screen y=233. Bottom actions occupy y=354..465, with label center
+y=410. Both use visible glyph bounds for vertical centering, excluding font
+ascent/descent padding; these positions are shared tokens, not page offsets.
 
 Colors and typography live in `firmware/demo/main/design.h`. Background #141c18,
 foreground #e9eee8, secondary #8d9e93, accent #c9f27b, divider #334038, button

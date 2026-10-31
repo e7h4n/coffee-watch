@@ -17,7 +17,7 @@ static int32_t previous_value=0;
 static bool have_value=false;
 static const char *names[]={"V60","Switch","AeroPress","Hoop"};
 static LGFX_Sprite *c;
-static void text(const char *s,int x,int y,int px,uint32_t color=FG,int max_width=0) {
+static void text(const char *s,int x,int y,int px,uint32_t color=FG,int max_width=0,bool ink_center=false) {
     struct FontSlot {lgfx::PointerWrapper data;lgfx::VLWfont font;bool loaded=false;};
     static FontSlot slots[sizeof(font_sizes)/sizeof(font_sizes[0])];
     int index=0;
@@ -31,6 +31,22 @@ static void text(const char *s,int x,int y,int px,uint32_t color=FG,int max_widt
         if(!max_width||c->textWidth(s)<=max_width||index==0)break;
         --index;
     }
+    if(ink_center) {
+        // Center the visible glyphs, not the font's ascent/descent padding.
+        const uint8_t *data=font_data[index];
+        auto be32=[](const uint8_t *p){return (int32_t)((uint32_t)p[0]<<24|(uint32_t)p[1]<<16|(uint32_t)p[2]<<8|p[3]);};
+        int top=1000,bottom=-1000;
+        for(const unsigned char *ch=(const unsigned char*)s;*ch;ch++) {
+            if(*ch==' ')continue;
+            for(int i=0;i<be32(data);i++) {
+                const uint8_t *g=data+24+i*28;
+                if(be32(g)!=*ch)continue;
+                int height=be32(g+4),ascent=be32(g+16);
+                top=std::min(top,-ascent);bottom=std::max(bottom,height-ascent);break;
+            }
+        }
+        if(top<=bottom) {c->setTextDatum(baseline_center);y-=(int)std::lround((top+bottom-1)*.5f);}
+    }
     c->setTextColor(mix(BG,color,(unsigned)(enter*255)));
     c->drawString(s,x,y+(y<design::button_top?(int)((1-enter)*12):0));
 }
@@ -40,8 +56,8 @@ static void fmt(int x,int y,int px,uint32_t color,const char *format,...) {
 static void time_text(uint32_t ms,int x,int y,int size) {fmt(x,y,size,FG,"%u:%02u",(unsigned)(ms/60000),(unsigned)(ms/1000%60));}
 static void field(const char *label,const char *value,int x,int y,int size=32,int width=160) {text(label,x,y,design::type::label,MUTED,width);text(value,x,y+34,size,FG,width);}
 static void bottom(const char *label,bool enabled,bool held) {
-    c->fillRect(0,354,c->width(),112,held&&enabled?ACCENT:BUTTON);c->drawFastHLine(0,354,c->width(),LINE);
-    text(label,234,393,design::type::button,held&&enabled?BG:(enabled?ACCENT:MUTED));
+    c->fillRect(0,design::button_top,c->width(),design::button_height,held&&enabled?ACCENT:BUTTON);c->drawFastHLine(0,design::button_top,c->width(),LINE);
+    text(label,design::center_x,design::button_center_y,design::type::button,held&&enabled?BG:(enabled?ACCENT:MUTED),0,true);
 }
 static uint32_t mix(uint32_t a,uint32_t b,unsigned alpha) {
     unsigned r=(((a>>16)&255)*(255-alpha)+((b>>16)&255)*alpha)/255;
@@ -111,7 +127,7 @@ bool ui_enabled(const cw_flow_t &s,int action) {
 }
 int ui_hit(const cw_flow_t &s,int x,int y) {
     if((x-234)*(x-234)+(y-233)*(y-233)>233*233)return 0;
-    return y>=354&&ui_enabled(s,1)?1:0;
+    return y>=design::button_top&&ui_enabled(s,1)?1:0;
 }
 static void highlights(const cw_flow_t &s,int y) {
     text("TDS",150,y,design::type::label,MUTED);text("Extraction",318,y,design::type::label,MUTED);
@@ -132,11 +148,11 @@ void ui_draw(const cw_flow_t &s,const UiState &u) {
         text("Hold both to restart",234,303,19,ACCENT);return;
     }
     if(!s.scale_ready&&s.stage!=CW_REPORT&&s.stage!=CW_CHART&&s.stage!=CW_TDS) {
-        text("Connect scale",234,226,design::type::status);if(s.error[0])text(s.error,234,290,18,MUTED);return;
+        text("Connect scale",design::center_x,design::center_y,design::type::status,FG,0,true);if(s.error[0])text(s.error,234,290,18,MUTED);return;
     }
     char b[64];
     switch(s.stage) {
-    case CW_HOME:text("Connect scale",234,226,design::type::status);break;
+    case CW_HOME:text("Connect scale",design::center_x,design::center_y,design::type::status,FG,0,true);break;
     case CW_BREWER:
         if(u.carousel_dir) {
             for(int k=-2;k<=2;k++) {
