@@ -141,3 +141,11 @@ The top-center battery widget is present on every page. Its percentage follows
 the official StopWatch UserDemo M5PM1 voltage estimate (3300..4200mV, filtered),
 sampled once per second. It is an estimate, not a fuel-gauge measurement. A failed
 read shows --%; battery updates do not reset inactivity or change brew state.
+
+## Scale power-off after settlement
+
+Once beverage capture has advanced to Waiting TDS, the scale is no longer
+required. Its disconnection preserves the settled dose, water, time and beverage
+and does not interrupt RS measurement or the final report/chart. Earlier scale
+loss still interrupts an active brew. Returning from Waiting TDS to reweigh
+requires the scale; if it is off, Back returns Home for an explicit new session.

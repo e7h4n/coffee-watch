@@ -29,13 +29,17 @@ int main(void) {
     weights(&f,0,60);assert(f.stage==CW_BEVERAGE&&!f.beverage_valid);
     weights(&f,-37000,10);assert(f.stage==CW_BEVERAGE);
     weights(&f,-37000,1);assert(f.stage==CW_TDS&&f.beverage_cg==27000);
+    // Final weighing is complete: the scale can power off before TDS arrives.
+    cw_scale_link(&f,false,7);
+    assert(f.stage==CW_TDS&&!f.interrupted&&f.beverage_valid&&f.scale.result_valid);
+    assert(f.beverage_cg==27000&&f.scale.result.dose_cg==1500&&f.scale.result.water_cg==30000);
     rs_event_t r={.kind=RS_MEASUREMENT,.tds_percent=1.4f};cw_rs_link(&f,true);
     cw_rs_message(&f,&r,f.wait_tds_us-1);assert(f.stage==CW_TDS);
     r.kind=RS_MEASUREMENT_ERROR;cw_rs_message(&f,&r,us+1);assert(f.stage==CW_TDS);
     r.kind=RS_MEASUREMENT;cw_rs_message(&f,&r,us+2);assert(f.stage==CW_REPORT);
     assert(fabsf(f.extraction-25.2f)<.0001f&&fabsf(f.retention-2.f)<.0001f&&fabsf(f.ratio-20.f)<.0001f);
     weights(&f,0,2);assert(f.beverage_cg==27000&&f.scale.result.water_cg==30000);
-    cw_home(&f);assert(!f.tds_valid&&!f.empty_valid&&!f.beverage_valid&&f.scale.dose_valid);
+    cw_home(&f);assert(!f.tds_valid&&!f.empty_valid&&!f.beverage_valid&&!f.scale.dose_valid);
     // No stale epoch, <=10g, or sparse packet sequence may complete capture.
     setup(&f);for(unsigned i=0;i<60;i++)weight(&f,20000,6);assert(!f.live_valid);
     weights(&f,1000,60);assert(f.stage==CW_EMPTY&&!f.stable.active);

@@ -16,7 +16,7 @@ void cw_home(cw_flow_t *s) {
 void cw_scale_link(cw_flow_t *s,bool connected,unsigned epoch) {
     s->scale_ready=connected;s->live_valid=false;clear_stable(s);s->write_pending=false;
     if(connected) {bookoo_session_connect(&s->scale,epoch);if(s->stage==CW_HOME&&!s->interrupted)change(s,CW_BREWER);}
-    else {bookoo_session_disconnect(&s->scale);s->interrupted=s->stage!=CW_HOME&&s->stage!=CW_BREWER&&s->stage!=CW_REPORT&&s->stage!=CW_CHART;}
+    else {bookoo_session_disconnect(&s->scale);s->interrupted=s->stage!=CW_HOME&&s->stage!=CW_BREWER&&s->stage!=CW_TDS&&s->stage!=CW_REPORT&&s->stage!=CW_CHART;}
 }
 void cw_rs_link(cw_flow_t *s,bool connected) {s->rs_ready=connected;}
 void cw_choose(cw_flow_t *s,unsigned brewer) {
@@ -137,5 +137,5 @@ void cw_back(cw_flow_t *s) {
         bookoo_session_begin(&s->scale);change(s,CW_PREP);return;
     }
     if(s->stage==CW_BEVERAGE) {s->beverage_valid=false;change(s,CW_BREW);return;}
-    if(s->stage==CW_TDS) {s->beverage_valid=false;change(s,CW_BEVERAGE);}
+    if(s->stage==CW_TDS) {if(!s->scale_ready) {cw_home(s);return;}s->beverage_valid=false;change(s,CW_BEVERAGE);}
 }

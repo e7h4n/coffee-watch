@@ -63,3 +63,11 @@ On every screen, 10 minutes without touch/button interaction or a state change
 powers off StopWatch through M5PM1. Page/session, scale phase, connection and
 interruption transitions restart the interval. Weight notifications, timer display
 updates, rendering and diagnostic status reads do not keep the device awake.
+
+## Scale power-off after settlement
+
+Once beverage capture has advanced to Waiting TDS, the scale is no longer
+required. Its disconnection preserves the settled dose, water, time and beverage
+and does not interrupt RS measurement or the final report/chart. Earlier scale
+loss still interrupts an active brew. Returning from Waiting TDS to reweigh
+requires the scale; if it is off, Back returns Home for an explicit new session.
