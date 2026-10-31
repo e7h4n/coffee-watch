@@ -1,25 +1,38 @@
 // SPDX-License-Identifier: MIT
 #include "ui.h"
 #include "icons.h"
+#include "design.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdarg>
-static constexpr uint32_t BG=0x141c18,FG=0xe9eee8,MUTED=0x8d9e93,ACCENT=0xc9f27b,LINE=0x334038,BUTTON=0x26352a;
+static constexpr uint32_t BG=design::background,FG=design::foreground,MUTED=design::muted,ACCENT=design::accent,LINE=design::line,BUTTON=design::button;
+static uint32_t mix(uint32_t a,uint32_t b,unsigned alpha);
+static float enter=1.f,value_flash=0.f,breath=0.f;
+static int spinner_angle=0;
+static int64_t entered_us=0,changed_us=0;
+static int previous_page=-1;
+static int32_t previous_value=0;
+static bool have_value=false;
 static const char *names[]={"V60","Switch","AeroPress","Hoop"};
 static LGFX_Sprite *c;
-static void text(const char *s,int x,int y,int px,uint32_t color=FG) {
+static void text(const char *s,int x,int y,int px,uint32_t color=FG,int max_width=0) {
     c->setFont(px>=36?&fonts::FreeSans24pt7b:&fonts::FreeSans12pt7b);
-    c->setTextSize((float)px/(px>=36?48:24));c->setTextDatum(middle_center);c->setTextColor(color);c->drawString(s,x,y);
+    c->setTextSize((float)px/(px>=36?48:24));c->setTextDatum(middle_center);
+    if(px>=design::type::hero&&!max_width)max_width=260;
+    int width=c->textWidth(s);
+    if(max_width&&width>max_width)c->setTextSize((float)px/(px>=36?48:24)*max_width/width);
+    c->setTextColor(mix(BG,color,(unsigned)(enter*255)));
+    c->drawString(s,x,y+(y<design::button_top?(int)((1-enter)*12):0));
 }
 static void fmt(int x,int y,int px,uint32_t color,const char *format,...) {
     char b[80];va_list a;va_start(a,format);vsnprintf(b,sizeof b,format,a);va_end(a);text(b,x,y,px,color);
 }
 static void time_text(uint32_t ms,int x,int y,int size) {fmt(x,y,size,FG,"%u:%02u",(unsigned)(ms/60000),(unsigned)(ms/1000%60));}
-static void field(const char *label,const char *value,int x,int y,int size=32) {text(label,x,y,18,MUTED);text(value,x,y+34,size);}
+static void field(const char *label,const char *value,int x,int y,int size=32,int width=160) {text(label,x,y,design::type::label,MUTED,width);text(value,x,y+34,size,FG,width);}
 static void bottom(const char *label,bool enabled,bool held) {
     c->fillRect(0,354,c->width(),112,held&&enabled?ACCENT:BUTTON);c->drawFastHLine(0,354,c->width(),LINE);
-    text(label,234,393,30,held&&enabled?BG:(enabled?ACCENT:MUTED));
+    text(label,234,393,design::type::button,held&&enabled?BG:(enabled?ACCENT:MUTED));
 }
 static uint32_t mix(uint32_t a,uint32_t b,unsigned alpha) {
     unsigned r=(((a>>16)&255)*(255-alpha)+((b>>16)&255)*alpha)/255;
@@ -39,6 +52,25 @@ static void icon(unsigned id,float x,float y,float size,uint32_t color) {
         }
     }
 }
+bool ui_tick(const cw_flow_t &s,int64_t now) {
+    int page=s.interrupted?100:(!s.scale_ready&&s.stage!=CW_TDS&&s.stage!=CW_REPORT&&s.stage!=CW_CHART?101:(int)s.stage);
+    if(page!=previous_page) {previous_page=page;entered_us=now;have_value=false;}
+    enter=std::clamp((now-entered_us)/(float)design::motion::enter_us,0.f,1.f);
+    enter=1-std::pow(1-enter,3);
+    int32_t value=s.stage==CW_BEVERAGE?-s.live_cg-s.empty_cg:s.live_cg;
+    if(!have_value||value!=previous_value) {previous_value=value;changed_us=now;have_value=true;}
+    bool numeric=s.stage==CW_EMPTY||s.stage==CW_PREP||s.stage==CW_BREW||s.stage==CW_BEVERAGE;
+    value_flash=numeric?1-std::clamp((now-changed_us)/(float)design::motion::value_us,0.f,1.f):0;
+    breath=.5f-.5f*std::cos((now%design::motion::breath_us)*6.2831853f/design::motion::breath_us);
+    spinner_angle=(int)((now%design::motion::spinner_us)*360/design::motion::spinner_us);
+    bool waiting=!s.interrupted&&(page==101||s.stage==CW_READY||s.stage==CW_TDS||s.write_pending);
+    return enter<1||value_flash>0||waiting;
+}
+static uint32_t number_color() {return mix(FG,ACCENT,(unsigned)(value_flash*90));}
+static void waiting_mark() {
+    c->drawArc(234,307,9,7,0,360,LINE);
+    c->drawArc(234,307,9,7,spinner_angle,spinner_angle+90,ACCENT);
+}
 bool ui_enabled(const cw_flow_t &s,int action) {
     if(s.interrupted||!s.scale_ready)return false;
     if(action==1) {
@@ -55,21 +87,21 @@ int ui_hit(const cw_flow_t &s,int x,int y) {
     return y>=354&&ui_enabled(s,1)?1:0;
 }
 static void highlights(const cw_flow_t &s,int y) {
-    text("TDS",150,y,18,MUTED);text("Extraction",318,y,18,MUTED);
-    fmt(150,y+39,39,ACCENT,"%.2f%%",(double)s.tds);fmt(318,y+39,39,ACCENT,"%.2f%%",(double)s.extraction);
+    text("TDS",150,y,design::type::label,MUTED);text("Extraction",318,y,design::type::label,MUTED);
+    fmt(150,y+42,design::type::result,ACCENT,"%.2f%%",(double)s.tds);fmt(318,y+42,design::type::result,ACCENT,"%.2f%%",(double)s.extraction);
 }
 void ui_draw(const cw_flow_t &s,const UiState &u) {
     c=&board_canvas();c->fillScreen(BG);
     if(s.interrupted) {
-        text("Brew interrupted",234,174,32);text(s.error[0]?s.error:"Scale disconnected",234,224,20,MUTED);
+        text("Brew interrupted",234,174,36);text(s.error[0]?s.error:"Scale disconnected",234,224,20,MUTED);
         text("Hold both to restart",234,303,19,ACCENT);return;
     }
     if(!s.scale_ready&&s.stage!=CW_REPORT&&s.stage!=CW_CHART&&s.stage!=CW_TDS) {
-        text("Connect scale",234,226,40);if(s.error[0])text(s.error,234,290,18,MUTED);return;
+        text("Connect scale",234,226,design::type::status);waiting_mark();if(s.error[0])text(s.error,234,290,18,MUTED);return;
     }
     char b[64];
     switch(s.stage) {
-    case CW_HOME:text("Connect scale",234,226,40);break;
+    case CW_HOME:text("Connect scale",234,226,design::type::status);waiting_mark();break;
     case CW_BREWER:
         if(u.carousel_dir) {
             for(int k=-2;k<=2;k++) {
@@ -89,41 +121,42 @@ void ui_draw(const cw_flow_t &s,const UiState &u) {
             c->drawArc(234,233,210,207,0,360,LINE);
             c->drawArc(234,233,210,207,270,270+360*std::min(1.f,s.stable.progress),ACCENT);
         }
-        text(caption,234,155,22,MUTED);
-        if(s.live_valid&&(empty||(s.live_cg<-3000&&weight>0)))fmt(225,236,76,FG,"%.1f",weight/100.0);
-        else text("--",234,236,76,MUTED);
+        text(caption,234,146,design::type::body,MUTED);
+        if(s.live_valid&&(empty||(s.live_cg<-3000&&weight>0)))fmt(225,236,design::type::hero,number_color(),"%.1f",weight/100.0);
+        else text("--",234,236,design::type::hero,MUTED);
         text("g",360,254,25,MUTED);
         if(empty&&!s.stable.active)bottom("Reset",ui_enabled(s,1),u.held==1);
         break;
     }
     case CW_PREP:
-        if(s.live_valid)fmt(225,228,76,FG,"%.1f",s.live_cg/100.0);else text("--",234,228,76,MUTED);
+        if(s.live_valid)fmt(225,228,design::type::hero,number_color(),"%.1f",s.live_cg/100.0);else text("--",234,228,design::type::hero,MUTED);
         text("g",360,249,25,MUTED);
         bottom(s.scale.pending==BOOKOO_CMD_READY?"Starting...":"Start",ui_enabled(s,1),u.held==1);break;
     case CW_READY:
-        text("Ready",234,226,48,ACCENT);break;
+        c->drawArc(234,233,177,175,0,360,mix(LINE,ACCENT,(unsigned)(breath*65)));
+        text("Ready",234,226,design::type::ready,ACCENT);break;
     case CW_BREW: {
         int32_t water=s.scale.phase==BOOKOO_STOPPED?s.scale.result.water_cg:s.live_cg;
-        text("Water",234,130,22,MUTED);fmt(213,206,86,FG,"%.1f",water/100.0);text("ml",355,229,24,MUTED);
+        text("Water",234,130,design::type::body,MUTED);fmt(213,206,design::type::hero,number_color(),"%.1f",water/100.0);text("ml",355,229,24,MUTED);
         if(s.scale.running_dose_valid)fmt(234,292,40,FG,"1:%.1f",(double)water/s.scale.running_dose_cg);else text("1:--",234,292,40,MUTED);
         bottom(s.scale.pending==BOOKOO_CMD_STOP?"Stopping...":"Stop",ui_enabled(s,1),u.held==1);break;
     }
     case CW_TDS:
-        snprintf(b,sizeof b,"%.1fg",s.scale.result.dose_cg/100.0);field("Coffee dose",b,151,143,33);
-        snprintf(b,sizeof b,"1:%.1f",(double)s.ratio);field("Brew ratio",b,317,143,33);
-        snprintf(b,sizeof b,"%.1fg",s.beverage_cg/100.0);field("Beverage",b,151,246,33);
-        text("Brew time",317,246,18,MUTED);time_text(s.scale.result.elapsed_ms,317,280,33);
-        text("Waiting TDS",234,359,28);
-        if(!s.rs_ready)text("RS Disconnected",234,396,16,MUTED);
-        else if(s.error[0])text(s.error,234,396,16,MUTED);
+        snprintf(b,sizeof b,"%.1fg",s.scale.result.dose_cg/100.0);field("Coffee dose",b,151,143,39);
+        snprintf(b,sizeof b,"1:%.1f",(double)s.ratio);field("Brew ratio",b,317,143,39);
+        snprintf(b,sizeof b,"%.1fg",s.beverage_cg/100.0);field("Beverage",b,151,246,39);
+        text("Brew time",317,246,design::type::label,MUTED);time_text(s.scale.result.elapsed_ms,317,280,39);
+        waiting_mark();text("Waiting TDS",234,365,34);
+        if(!s.rs_ready)text("RS Disconnected",234,406,20,MUTED);
+        else if(s.error[0])text(s.error,234,406,20,MUTED);
         break;
     case CW_REPORT:
-        time_text(s.scale.result.elapsed_ms,234,93,57);
-        snprintf(b,sizeof b,"%.1fg",s.scale.result.dose_cg/100.0);field("Coffee",b,127,164,30);
-        snprintf(b,sizeof b,"%.1fml",s.scale.result.water_cg/100.0);field("Water",b,234,164,30);
-        snprintf(b,sizeof b,"%.1fg",s.beverage_cg/100.0);field("Beverage",b,341,164,30);
-        snprintf(b,sizeof b,"1:%.1f",(double)s.ratio);field("Ratio",b,155,260,29);
-        snprintf(b,sizeof b,"%.2fg/g",(double)s.retention);field("Retention",b,313,260,29);
+        time_text(s.scale.result.elapsed_ms,234,88,design::type::time);
+        snprintf(b,sizeof b,"%.1fg",s.scale.result.dose_cg/100.0);field("Coffee",b,127,164,32,100);
+        snprintf(b,sizeof b,"%.1fml",s.scale.result.water_cg/100.0);field("Water",b,234,164,32,100);
+        snprintf(b,sizeof b,"%.1fg",s.beverage_cg/100.0);field("Beverage",b,341,164,32,100);
+        snprintf(b,sizeof b,"1:%.1f",(double)s.ratio);field("Ratio",b,155,260,34);
+        snprintf(b,sizeof b,"%.2fg/g",(double)s.retention);field("Retention",b,313,260,32);
         highlights(s,354);break;
     case CW_CHART: {
         auto xx=[](float v){return 75+(v-14)*318/12;};

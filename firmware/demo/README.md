@@ -119,3 +119,13 @@ On every screen, 10 minutes without touch/button interaction or a state change
 powers off StopWatch through M5PM1. Page/session, scale phase, connection and
 interruption transitions restart the interval. Weight notifications, timer display
 updates, rendering and diagnostic status reads do not keep the device awake.
+
+## Shared visuals and motion
+
+The [visual system](../../spec/design.md) defines the current typography, color
+palette, components, layout limits and animation timings. `main/design.h` owns
+shared tokens. The renderer has display-only page entry, value-change tint,
+Ready breathing and waiting-arc animations, alongside the brewer carousel.
+Sensor values change immediately at their actual rounded value; animation never
+interpolates measurements or completes a business operation. UI animation also
+does not reset the global idle shutdown interval.

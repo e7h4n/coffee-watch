@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "ui.h"
+#include "design.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
@@ -144,7 +145,7 @@ static void console_task(void *arg) {
 extern "C" void app_main() {
     setvbuf(stdin,nullptr,_IONBF,0);ESP_ERROR_CHECK(nvs_flash_init());
     events=xQueueCreate(128,sizeof(demo_event_t));console_commands=xQueueCreate(4,sizeof(ConsoleCommand));configASSERT(events&&console_commands);
-    cw_init(&flow);board_init();ui_draw(flow,ui);board_present();
+    cw_init(&flow);board_init();ui_tick(flow,now_us());ui_draw(flow,ui);board_present();
     transport_init();xTaskCreate(console_task,"console",4096,nullptr,2,nullptr);
     ESP_LOGI("demo","coffee-watch-demo-v3; UI=%dx%d",(int)board_canvas().width(),(int)board_canvas().height());
     int64_t last_draw=0,last_activity=now_us();
@@ -159,7 +160,7 @@ extern "C" void app_main() {
         if(raw.next||raw.select||(raw.touch_valid&&raw.touch))last_activity=now;
         input_tick(raw,now);
         if(ui.carousel_dir) {
-            float t=(now-animation_start)/380000.f;
+            float t=(now-animation_start)/(float)design::motion::carousel_us;
             if(t>=1) {
                 flow.brewer=(ui.carousel_from+ui.carousel_dir+4)%4;ui.carousel_dir=0;
                 if(queue_read<queue_write)animate(queued[queue_read++%16]);
@@ -188,7 +189,8 @@ extern "C" void app_main() {
             board_shutdown();
             vTaskSuspend(nullptr);
         }
-        if(render_needed&&now-last_draw>=33000) {ui_draw(flow,ui);board_present();last_draw=now;render_needed=false;}
+        if(ui_tick(flow,now))render_needed=true;
+        if(render_needed&&now-last_draw>=design::motion::frame_us) {ui_draw(flow,ui);board_present();last_draw=now;render_needed=false;}
         vTaskDelay(pdMS_TO_TICKS(5));
     }
 }

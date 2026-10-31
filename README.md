@@ -62,6 +62,7 @@ building, and flashing.
 
 ## Development documentation
 
+- [Visual system and shared components](spec/design.md)
 - [Product behavior and interactions](spec/product.md)
 - [Bluetooth interfaces](spec/bluetooth.md)
 - [Acceptance checklist](spec/acceptance.md)
