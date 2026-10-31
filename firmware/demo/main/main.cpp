@@ -147,10 +147,17 @@ extern "C" void app_main() {
     cw_init(&flow);board_init();ui_draw(flow,ui);board_present();
     transport_init();xTaskCreate(console_task,"console",4096,nullptr,2,nullptr);
     ESP_LOGI("demo","coffee-watch-demo-v3; UI=%dx%d",(int)board_canvas().width(),(int)board_canvas().height());
-    int64_t last_draw=0;
+    int64_t last_draw=0,last_activity=now_us();
+    constexpr int64_t idle_limit_us=10LL*60*1000000;
+    unsigned last_generation=flow.generation;
+    auto last_phase=flow.scale.phase;
+    bool last_scale=flow.scale_ready,last_rs=flow.rs_ready,last_interrupted=flow.interrupted;
     for(;;) {
         demo_event_t e;unsigned n=0;while(n++<32&&xQueueReceive(events,&e,0)==pdTRUE)receive(e);
-        int64_t now=now_us();input_tick(board_input(),now);
+        int64_t now=now_us();
+        BoardInput raw=board_input();
+        if(raw.next||raw.select||(raw.touch_valid&&raw.touch))last_activity=now;
+        input_tick(raw,now);
         if(ui.carousel_dir) {
             float t=(now-animation_start)/380000.f;
             if(t>=1) {
@@ -163,11 +170,23 @@ extern "C" void app_main() {
         if(xQueueReceive(console_commands,&cmd,0)==pdTRUE) {
             if(!strcmp(cmd.line,"screen"))board_dump();
             else if(!strcmp(cmd.line,"status"))printf("STATUS stage=%u generation=%u scale=%u rs=%u phase=%u dose_valid=%u dose_cg=%ld weight_cg=%ld empty_cg=%ld beverage_cg=%ld\n",flow.stage,flow.generation,flow.scale_ready,flow.rs_ready,flow.scale.phase,flow.scale.dose_valid,(long)flow.scale.dose_cg,(long)flow.live_cg,(long)flow.empty_cg,(long)flow.beverage_cg);
-            else if(!strcmp(cmd.line,"home"))go_home();
-            else if(!strcmp(cmd.line,"next"))animate(1);
-            else if(!strcmp(cmd.line,"select"))action(1);
-            else if(!strcmp(cmd.line,"back"))back();
+            else if(!strcmp(cmd.line,"home")) {last_activity=now;go_home();}
+            else if(!strcmp(cmd.line,"next")) {last_activity=now;animate(1);}
+            else if(!strcmp(cmd.line,"select")) {last_activity=now;action(1);}
+            else if(!strcmp(cmd.line,"back")) {last_activity=now;back();}
             render_needed=true;
+        }
+        if(flow.generation!=last_generation||flow.scale.phase!=last_phase||
+           flow.scale_ready!=last_scale||flow.rs_ready!=last_rs||flow.interrupted!=last_interrupted) {
+            last_activity=now;
+            last_generation=flow.generation;last_phase=flow.scale.phase;
+            last_scale=flow.scale_ready;last_rs=flow.rs_ready;last_interrupted=flow.interrupted;
+        }
+        // Global product idle policy. Weight updates and repainting are not activity.
+        if(now-last_activity>=idle_limit_us) {
+            ESP_LOGI("demo","No interaction or state change for 10 minutes; shutting down");
+            board_shutdown();
+            vTaskSuspend(nullptr);
         }
         if(render_needed&&now-last_draw>=33000) {ui_draw(flow,ui);board_present();last_draw=now;render_needed=false;}
         vTaskDelay(pdMS_TO_TICKS(5));

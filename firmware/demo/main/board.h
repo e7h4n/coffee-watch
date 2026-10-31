@@ -6,3 +6,4 @@ BoardInput board_input();
 LGFX_Sprite &board_canvas();
 void board_present();
 void board_dump();
+void board_shutdown();

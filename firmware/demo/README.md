@@ -112,3 +112,10 @@ CRC/XOR-validated response `03 10` and unsigned BE24 centigrams at offsets 6..8.
 There is no periodic re-query or alternate-value path. Changes arrive as 03 0F.
 The connection-handshake buffer protects a snapshot arriving before ATT completion.
 Disconnect invalidates the cache; a new connection queries the actual scale again.
+
+## Idle shutdown
+
+On every screen, 10 minutes without touch/button interaction or a state change
+powers off StopWatch through M5PM1. Page/session, scale phase, connection and
+interruption transitions restart the interval. Weight notifications, timer display
+updates, rendering and diagnostic status reads do not keep the device awake.

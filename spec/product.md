@@ -56,3 +56,10 @@ action. Press highlights, release executes, and dragging outside cancels.
 Hold Next 650ms for Back; hold both keys 900ms for Home, consuming short actions.
 Back during brewing requests Stop and waits for the exact event. Back from Ready
 requests Exit Ready and waits for its event. Reports use swipes, not short keys.
+
+## Idle shutdown
+
+On every screen, 10 minutes without touch/button interaction or a state change
+powers off StopWatch through M5PM1. Page/session, scale phase, connection and
+interruption transitions restart the interval. Weight notifications, timer display
+updates, rendering and diagnostic status reads do not keep the device awake.

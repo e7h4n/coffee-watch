@@ -186,3 +186,7 @@ void board_dump() {
     }
     puts("SCREEN_END");
 }
+
+void board_shutdown() {
+    configASSERT(pmic.shutdown()==M5PM1_OK);
+}
