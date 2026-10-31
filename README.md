@@ -1,25 +1,26 @@
 # Coffee Watch
 
-A small-screen coffee brewing companion for the **M5Stack StopWatch**, **BOOKOO Themis Ultra** scale and **DiFluid R2 Extract** refractometer.
+Coffee brewing companion for M5Stack StopWatch, BOOKOO Themis Ultra 4.0.1
+(Ratio + Auto), and DiFluid RS v002-005.
 
-The product follows scale measurements and timer events rather than asking users to manage a recipe wizard. R2 is only needed after beverage weighing.
+The watch captures empty-server mass, arms Auto Ready, follows exact brewing
+events, measures beverage by server removal, and receives a fresh TDS result for
+its numerical report and Golden Cup chart.
 
-## Specification and prototype
+- [Build, flash and walkthrough](firmware/demo/README.md)
+- [Product behavior](spec/product.md)
+- [Bluetooth interfaces](spec/bluetooth.md)
+- [Acceptance checklist](spec/acceptance.md)
+- [Brewer artwork](spec/icons/)
+- [Browser design reference](spec/prototype.html): historical visual prototype,
+  with simulated hardware. Its workflow predates the native firmware.
 
-- [Product specification](spec/product.md): authoritative product behavior and interaction rules.
-- [Bluetooth integration](spec/bluetooth.md): documented capabilities, version limits and hardware validation work.
-- [Acceptance checklist](spec/acceptance.md): behavior to preserve during implementation.
-- [Interactive prototype](spec/prototype.html): latest accepted dark/green UI, with an external hardware simulator.
-- [Brewer SVG assets](spec/icons/).
-
-Open `spec/prototype.html` directly in a browser, or serve the repository:
+From the repository root, run protocol and native state-machine tests:
 
 ```sh
-python3 -m http.server 8000
+python3 -m unittest discover -s tools -v
 ```
 
-Then open `http://localhost:8000/spec/prototype.html`.
-
-The prototype is self-contained: CSS, JavaScript and brewer SVGs are inline. It needs no build step or network connection. It does **not** connect to Bluetooth or flash hardware. The simulator controls outside the circular device are development tools, not device UI.
-
-This repository currently captures product design, not production firmware. No device firmware, credentials, flash dumps or private user data are included.
+Requires a C compiler; the native AES harness uses macOS CommonCrypto. Firmware
+uses ESP-IDF mbedTLS. Build outputs, downloaded drivers and local captures are
+excluded from Git.

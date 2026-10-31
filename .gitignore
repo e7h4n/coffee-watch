@@ -1,3 +1,13 @@
 .DS_Store
 *.log
 node_modules/
+**/build/
+**/sdkconfig
+**/sdkconfig.old
+**/__pycache__/
+captures/
+
+# Fixed-version upstream board drivers; fetched by firmware/demo/fetch_drivers.py
+firmware/demo/components/M5GFX/
+firmware/demo/components/M5PM1/
+firmware/demo/components/M5IOE1/
