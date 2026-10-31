@@ -42,3 +42,10 @@ Native test suite: 10 scenarios including complete measurement->report arithmeti
 stale/wrong epoch, thresholds/gaps/drift, event-only command completion, missing
 dose, interrupted state, negative removal/gaps, frozen-result revisiting and Back waiting
 for Stop. Tests use explicit fixture events outside the deployed firmware.
+
+Brewer confirmation starts a one-pass initialization transaction. A validated
+0E snapshot must confirm Ratio + Auto, then Exit Ready / Exit Done / tare are
+dispatched in order, once each. ATT status serializes these writes but does not
+assert tare completion. Empty-server capture remains blocked until the writes
+finish, then requires its normal actual-notification stability window. Bad mode
+or any write failure interrupts the transaction without retries.

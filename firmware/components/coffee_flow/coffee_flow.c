@@ -8,10 +8,10 @@ static void clear_stable(cw_flow_t *s) {memset(&s->stable,0,sizeof s->stable);}
 static void change(cw_flow_t *s,cw_stage_t stage) {s->stage=stage;clear_stable(s);s->generation++;s->error[0]=0;}
 void cw_init(cw_flow_t *s) {memset(s,0,sizeof *s);bookoo_session_init(&s->scale);s->stage=CW_HOME;}
 void cw_home(cw_flow_t *s) {
-    bool connected=s->scale_ready,rs=s->rs_ready;unsigned generation=s->generation+1;
+    bool connected=s->scale_ready,rs=s->rs_ready,done=s->scale_done;unsigned generation=s->generation+1;
     bookoo_session_t device=s->scale;
     cw_init(s);s->generation=generation;s->rs_ready=rs;
-    if(connected) {s->scale_ready=true;s->scale=device;bookoo_session_begin(&s->scale);s->stage=CW_BREWER;}
+    if(connected) {s->scale_ready=true;s->scale_done=done;s->scale=device;bookoo_session_begin(&s->scale);s->stage=CW_BREWER;}
 }
 void cw_scale_link(cw_flow_t *s,bool connected,unsigned epoch) {
     s->scale_ready=connected;s->live_valid=false;clear_stable(s);s->write_pending=false;
@@ -21,7 +21,19 @@ void cw_scale_link(cw_flow_t *s,bool connected,unsigned epoch) {
 void cw_rs_link(cw_flow_t *s,bool connected) {s->rs_ready=connected;}
 void cw_choose(cw_flow_t *s,unsigned brewer) {
     if(s->stage!=CW_BREWER||!s->scale_ready)return;
-    s->brewer=brewer%4;bookoo_session_begin(&s->scale);change(s,CW_EMPTY);
+    s->brewer=brewer%4;bookoo_session_begin(&s->scale);s->live_valid=false;s->initial_step=1;change(s,CW_EMPTY);
+}
+bool cw_initial_request(cw_flow_t *s,uint8_t packet[6]) {
+    if(!packet||s->stage!=CW_EMPTY||!s->scale_ready||s->interrupted||s->write_pending)return false;
+    unsigned step=s->initial_step;
+    if(step!=1&&step!=3&&step!=4&&step!=5)return false;
+    packet[0]=3;packet[1]=10;packet[3]=packet[4]=0;
+    if(step==1)packet[2]=15; // Query current mode before issuing phase-specific writes.
+    else if(step==3) {packet[2]=24;packet[3]=1;} // Exit Ready, never enter/start it.
+    else if(step==4)packet[2]=7; // Exit Done; documented no-op in automatic Idle.
+    else packet[2]=1; // Tare in Idle after the two exits, never a completion ACK.
+    packet[5]=packet[0]^packet[1]^packet[2]^packet[3];
+    s->initial_step=step+1;s->write_pending=true;clear_stable(s);return true;
 }
 static bool stable(cw_flow_t *s,int32_t value,int64_t us,int64_t duration,int32_t minimum) {
     cw_stable_t *w=&s->stable;
@@ -47,9 +59,13 @@ void cw_scale_message(cw_flow_t *s,unsigned epoch,const bookoo_message_t *m,int6
     if(m->kind==BOOKOO_AUTO&&m->state==4)s->scale_done=false;
     if(m->kind==BOOKOO_AUTO&&m->state==0)s->scale_done=true;
     unsigned update=bookoo_session_receive(&s->scale,epoch,m);
+    if(m->kind==BOOKOO_MODE&&s->stage==CW_EMPTY&&s->initial_step==2) {
+        if(m->mode==2&&m->submode==2)s->initial_step=3;
+        else {s->interrupted=true;snprintf(s->error,sizeof s->error,"Use Ratio + Auto");}
+    }
     if(m->kind==BOOKOO_WEIGHT) {
         s->live_cg=m->weight_cg;s->live_valid=true;
-        if(!s->write_pending&&before==CW_EMPTY) {
+        if(!s->write_pending&&!s->initial_step&&before==CW_EMPTY) {
             if(stable(s,s->live_cg,us,5000000,1000)) {s->empty_cg=s->live_cg;s->empty_valid=true;change(s,CW_PREP);}
         } else if(before==CW_BEVERAGE&&s->empty_valid&&s->scale_done) {
             // Auto Done streams zero with the server present, negative gross
@@ -93,7 +109,7 @@ void cw_rs_message(cw_flow_t *s,const rs_event_t *e,int64_t us) {
 }
 bool cw_reset_dispatch(cw_flow_t *s,uint8_t packet[6]) {
     if(!packet||!s->scale_ready||s->interrupted||s->write_pending||s->scale.pending||s->stable.active)return false;
-    if(s->stage!=CW_EMPTY)return false;
+    if(s->stage!=CW_EMPTY||s->initial_step)return false;
     // BOOKOO 4.0.1: 01 is unavailable in Auto Done; 07 explicitly exits
     // Done and tares. Select by the confirmed device phase, never by failure.
     packet[0]=3;packet[1]=10;packet[2]=s->scale_done?7:1;packet[3]=packet[4]=0;
@@ -103,6 +119,8 @@ bool cw_reset_dispatch(cw_flow_t *s,uint8_t packet[6]) {
 }
 void cw_write_done(cw_flow_t *s,bool success) {
     s->write_pending=false;clear_stable(s);
+    if(success&&s->initial_step==6)s->initial_step=0;
+    if(!success&&s->initial_step)s->interrupted=true;
     if(!success) {bookoo_session_write_failed(&s->scale);snprintf(s->error,sizeof s->error,"Scale write failed");}
 }
 bool cw_ready_request(cw_flow_t *s,uint8_t packet[6]) {
@@ -129,7 +147,7 @@ void cw_revisit_stopped(cw_flow_t *s) {
 }
 void cw_back(cw_flow_t *s) {
     if(s->stage==CW_REPORT||s->stage==CW_CHART||s->stage==CW_BREWER||s->interrupted) {cw_home(s);return;}
-    if(s->stage==CW_EMPTY) {bookoo_session_begin(&s->scale);s->empty_valid=false;change(s,CW_BREWER);return;}
+    if(s->stage==CW_EMPTY) {s->initial_step=0;bookoo_session_begin(&s->scale);s->empty_valid=false;change(s,CW_BREWER);return;}
     if(s->stage==CW_PREP) {bookoo_session_begin(&s->scale);s->empty_valid=false;change(s,CW_EMPTY);return;}
     if(s->stage==CW_READY) {s->back_pending=true;return;}
     if(s->stage==CW_BREW) {

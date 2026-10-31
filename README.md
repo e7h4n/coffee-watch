@@ -9,6 +9,8 @@ together to calculate and present your brew data with minimal manual recording.
 ## From brewing to a report
 
 1. **Choose a brewer.** Select V60, Hario Switch, AeroPress, or Ceado Hoop.
+   Selection initializes the scale and clears any previous brew result. Keep
+   the platform empty until initialization finishes.
 2. **Weigh the empty server.** Capture its mass automatically. Coffee dose comes
    from the value you saved on the scale during bean preparation.
 3. **Start brewing.** Tap Start to arm Auto READY. Pouring starts the timer through

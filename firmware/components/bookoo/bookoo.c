@@ -20,6 +20,8 @@ bookoo_parse_t bookoo_decode(const uint8_t *d,size_t n,bookoo_message_t *out)
         m.kind=BOOKOO_WEIGHT;m.elapsed_ms=be24(d+2);m.display_unit=d[5];m.battery=d[13];
         if(!signed_value(d[6],be24(d+7),&m.weight_cg) ||
            !signed_value(d[10],((uint32_t)d[11]<<8)|d[12],&m.flow_cg_s))return BOOKOO_BAD_SIGN;
+    } else if(d[1]==0x0e) {
+        m.kind=BOOKOO_MODE;m.mode=d[2];m.submode=d[5];
     } else if(d[1]==0x10) {
         // Official BOOKOO N getFeatureInfo (14) snapshot: stored dose bytes 6..8.
         m.kind=BOOKOO_DOSE;m.dose_cg=(int32_t)be24(d+6);

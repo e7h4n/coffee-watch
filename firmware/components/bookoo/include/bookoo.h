@@ -5,12 +5,12 @@
 #include <stdint.h>
 
 // All mass values are signed hundredths of a gram; no floating-point conversion.
-typedef enum { BOOKOO_UNKNOWN, BOOKOO_WEIGHT, BOOKOO_DOSE, BOOKOO_AUTO } bookoo_kind_t;
+typedef enum { BOOKOO_UNKNOWN, BOOKOO_WEIGHT, BOOKOO_DOSE, BOOKOO_AUTO, BOOKOO_MODE } bookoo_kind_t;
 typedef enum { BOOKOO_PARSE_OK, BOOKOO_BAD_LENGTH, BOOKOO_BAD_CHECKSUM,
                BOOKOO_BAD_SIGN, BOOKOO_BAD_STATE } bookoo_parse_t;
 typedef struct {
     bookoo_kind_t kind;
-    uint8_t type, state, battery, display_unit;
+    uint8_t type, state, battery, display_unit, mode, submode;
     uint32_t elapsed_ms;
     int32_t weight_cg, flow_cg_s, dose_cg, settlement_hundredths;
 } bookoo_message_t;

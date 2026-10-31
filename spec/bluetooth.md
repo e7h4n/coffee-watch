@@ -56,3 +56,12 @@ The decoder supports fragmented and adjacent frames with bounded storage. A
 connection change discards partial frames. CRC, sum, level and exact result route
 must all validate before reporting. Native and Python tests retain representative
 packet fixtures; no APK or decompiled client source is included.
+
+## Initialization mode snapshot
+
+Command `03 0A 0F 00 00 06` returns a 20-byte XOR-validated `03 0E` snapshot.
+For the validated 4.0.1 unit: offset 2 is current mode (2 = Ratio), offset 5 is
+Ratio submode (2 = Auto). This snapshot does not expose the current Auto phase.
+Selection initialization therefore validates this mode, then uses a fixed
+Exit Ready / Exit Done / tare dispatch sequence, rather than inferring Done
+from the mode snapshot or a zero/negative live weight.

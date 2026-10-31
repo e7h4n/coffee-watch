@@ -2,7 +2,9 @@
 
 - [ ] Scale connects without RS; all four brewers can be selected by swipe/Next.
 - [ ] Bottom press/release and Select agree; dragging out cancels.
-- [ ] Empty-server capture starts automatically, >10g and stable 5 seconds.
+- [ ] Brewer confirmation initializes Ratio + Auto with a fixed query/exit/tare
+      sequence, including a scale left in Ready or the previous result.
+- [ ] Empty-server capture starts automatically after initialization, >10g and stable 5 seconds.
 - [ ] Saved dose before startup is read without resaving during preparation.
 - [ ] Preparation has one Start; exact Ready event opens Ready, not brewing.
 - [ ] Pouring triggers brewing; Stop freezes water/time/dose from its event.

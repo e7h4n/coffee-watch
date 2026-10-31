@@ -8,7 +8,7 @@ typedef struct {
     cw_stage_t stage;
     bookoo_session_t scale;
     cw_stable_t stable;
-    unsigned generation,brewer;
+    unsigned generation,brewer,initial_step;
     bool scale_ready,rs_ready,interrupted,write_pending,live_valid,scale_done;
     int32_t live_cg,empty_cg,beverage_cg;
     bool empty_valid,beverage_valid,tds_valid,back_pending;
@@ -26,6 +26,8 @@ void cw_choose(cw_flow_t *s,unsigned brewer);
 void cw_scale_message(cw_flow_t *s,unsigned epoch,const bookoo_message_t *m,int64_t us);
 void cw_rs_message(cw_flow_t *s,const rs_event_t *e,int64_t us);
 // Reset is dispatch only; write completion is transport status, never a tare ACK.
+// Fixed, single-pass mode query -> Exit Ready -> Exit Done -> tare dispatch.
+bool cw_initial_request(cw_flow_t *s,uint8_t packet[6]);
 bool cw_reset_dispatch(cw_flow_t *s,uint8_t packet[6]);
 void cw_write_done(cw_flow_t *s,bool success);
 bool cw_ready_request(cw_flow_t *s,uint8_t packet[6]);

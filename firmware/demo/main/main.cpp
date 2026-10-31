@@ -188,6 +188,8 @@ extern "C" void app_main() {
             last_generation=flow.generation;last_phase=flow.scale.phase;
             last_scale=flow.scale_ready;last_rs=flow.rs_ready;last_interrupted=flow.interrupted;
         }
+        uint8_t initial_packet[6];
+        if(cw_initial_request(&flow,initial_packet)) {ESP_LOGI("flow","Scale initialization command=%02X param=%02X",initial_packet[2],initial_packet[3]);transport_write(initial_packet,flow.generation);}
         // Global product idle policy. Weight updates and repainting are not activity.
         if(now-last_activity>=idle_limit_us) {
             ESP_LOGI("demo","No interaction or state change for 10 minutes; shutting down");

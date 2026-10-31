@@ -71,3 +71,16 @@ required. Its disconnection preserves the settled dose, water, time and beverage
 and does not interrupt RS measurement or the final report/chart. Earlier scale
 loss still interrupts an active brew. Returning from Waiting TDS to reweigh
 requires the scale; if it is off, Back returns Home for an explicit new session.
+
+## Brewer selection initializes the scale
+
+Confirming a brewer displays Preparing scale and blocks empty-server capture.
+A single mode query (0F -> 0E) must report Ratio (byte 2 = 2) and its Auto submode
+(byte 5 = 2). Unsupported configuration is an explicit interruption. Then a fixed
+single-pass sequence dispatches Exit Ready (18/01), Exit Done (07), and tare (01),
+in this order. Each write is sent once, serialized by its ATT result; there is no
+retry or alternate sequence. Exit Ready prevents 07 from starting a Ready scale;
+in Auto Idle, 07 is a documented no-op. Done exit is event 04 when applicable.
+ATT success is dispatch status, never a tare-completed assertion. Only subsequent
+actual weight notifications can complete the independent 5-second empty-server
+capture rule. Mode query or write failure cannot advance capture.

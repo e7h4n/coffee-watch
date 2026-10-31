@@ -29,13 +29,15 @@ Start serial capture before connecting BLE; closing USB can reset StopWatch.
 
 ## Walkthrough
 
-1. Disconnect the phone apps. Clear any old result on the scale and enable
+1. Disconnect the phone apps. Enable
    **Ratio + Auto**. Keep the platform empty when powering the watch.
 2. The watch finds the scale, discovers service/characteristics, subscribes to
    **both** FF12 and FF11, then opens the brewer carousel.
 3. Swipe or short Next to choose V60 / Switch / AeroPress / Hoop. Confirm by
    releasing the bottom brewer name, or short Select.
-4. The empty-server page is already armed. If needed, Reset with the empty
+4. Confirming the brewer first initializes the scale, including any old result.
+   Keep the platform empty during initialization. After Preparing scale, the
+   empty-server page is armed. If needed, Reset with the empty
    platform. Place the empty server; >10g and 5 continuous stable seconds capture
    its measured mass. The ring follows the actual measurement window.
 5. Weigh and save the dose on the scale as part of bean preparation, even before
@@ -149,3 +151,16 @@ required. Its disconnection preserves the settled dose, water, time and beverage
 and does not interrupt RS measurement or the final report/chart. Earlier scale
 loss still interrupts an active brew. Returning from Waiting TDS to reweigh
 requires the scale; if it is off, Back returns Home for an explicit new session.
+
+## Brewer selection initializes the scale
+
+Confirming a brewer displays Preparing scale and blocks empty-server capture.
+A single mode query (0F -> 0E) must report Ratio (byte 2 = 2) and its Auto submode
+(byte 5 = 2). Unsupported configuration is an explicit interruption. Then a fixed
+single-pass sequence dispatches Exit Ready (18/01), Exit Done (07), and tare (01),
+in this order. Each write is sent once, serialized by its ATT result; there is no
+retry or alternate sequence. Exit Ready prevents 07 from starting a Ready scale;
+in Auto Idle, 07 is a documented no-op. Done exit is event 04 when applicable.
+ATT success is dispatch status, never a tare-completed assertion. Only subsequent
+actual weight notifications can complete the independent 5-second empty-server
+capture rule. Mode query or write failure cannot advance capture.

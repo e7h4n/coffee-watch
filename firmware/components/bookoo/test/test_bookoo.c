@@ -96,7 +96,7 @@ static void test_decode_failure_does_not_publish_partial_data(void)
     assert(bookoo_decode(p,20,&out)==BOOKOO_BAD_SIGN);assert(out.dose_cg==123);
     assert(bookoo_decode(p,19,&out)==BOOKOO_BAD_LENGTH);
     bookoo_message_t unknown=captured("030E020401020000000000000000000000000008");
-    assert(unknown.kind==BOOKOO_UNKNOWN);
+    assert(unknown.kind==BOOKOO_MODE&&unknown.mode==2&&unknown.submode==2);
 }
 static void test_removal_uses_settlement_not_negative_stream(void)
 {

@@ -73,7 +73,7 @@ bool ui_tick(const cw_flow_t &s,int64_t now) {
     value_flash=numeric?1-std::clamp((now-changed_us)/(float)design::motion::value_us,0.f,1.f):0;
     breath=.5f-.5f*std::cos((now%design::motion::breath_us)*6.2831853f/design::motion::breath_us);
     spinner_angle=(int)((now%design::motion::spinner_us)*360/design::motion::spinner_us);
-    bool waiting=!s.interrupted&&(page==101||s.stage==CW_READY||s.stage==CW_TDS||s.write_pending);
+    bool waiting=!s.interrupted&&(page==101||s.stage==CW_READY||s.stage==CW_TDS||s.write_pending||s.initial_step);
     return enter<1||value_flash>0||waiting;
 }
 static uint32_t number_color() {return mix(FG,ACCENT,(unsigned)(value_flash*90));}
@@ -85,7 +85,7 @@ bool ui_enabled(const cw_flow_t &s,int action) {
     if(s.interrupted||!s.scale_ready)return false;
     if(action==1) {
         if(s.stage==CW_BREWER)return true;
-        if(s.stage==CW_EMPTY)return !s.stable.active&&!s.write_pending;
+        if(s.stage==CW_EMPTY)return !s.initial_step&&!s.stable.active&&!s.write_pending;
         if(s.stage==CW_BREW)return !s.write_pending&&!s.scale.pending;
     }
     if(s.stage==CW_PREP&&action==1&&!s.write_pending&&!s.scale.pending)
@@ -133,17 +133,18 @@ void ui_draw(const cw_flow_t &s,const UiState &u) {
     case CW_EMPTY:case CW_BEVERAGE: {
         bool empty=s.stage==CW_EMPTY;
         int32_t weight=empty?s.live_cg:-s.live_cg-s.empty_cg;
-        const char *caption=empty?(s.stable.active?"Empty server":"Place empty server"):
+        const char *caption=empty?(s.initial_step?"Preparing scale":(s.stable.active?"Empty server":"Place empty server")):
             (s.stable.active?"Beverage weight":"Remove server");
         if(s.stable.active) {
             c->drawArc(234,233,194,191,0,360,LINE);
             c->drawArc(234,233,194,191,270,270+360*std::min(1.f,s.stable.progress),ACCENT);
         }
         text(caption,234,146,design::type::body,MUTED);
+        if(s.initial_step)waiting_mark();
         if(s.live_valid&&(empty||(s.live_cg<-3000&&weight>0)))fmt(225,236,design::type::hero,number_color(),"%.1f",weight/100.0);
         else text("--",234,236,design::type::hero,MUTED);
         text("g",360,254,25,MUTED);
-        if(empty&&!s.stable.active)bottom("Reset",ui_enabled(s,1),u.held==1);
+        if(empty&&!s.initial_step&&!s.stable.active)bottom("Reset",ui_enabled(s,1),u.held==1);
         break;
     }
     case CW_PREP:
