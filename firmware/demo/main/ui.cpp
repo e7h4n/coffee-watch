@@ -2,10 +2,12 @@
 #include "ui.h"
 #include "icons.h"
 #include "design.h"
+#include "smooth_fonts.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdarg>
+#include <cstring>
 static constexpr uint32_t BG=design::background,FG=design::foreground,MUTED=design::muted,ACCENT=design::accent,LINE=design::line,BUTTON=design::button;
 static uint32_t mix(uint32_t a,uint32_t b,unsigned alpha);
 static float enter=1.f,value_flash=0.f,breath=0.f;
@@ -17,11 +19,19 @@ static bool have_value=false;
 static const char *names[]={"V60","Switch","AeroPress","Hoop"};
 static LGFX_Sprite *c;
 static void text(const char *s,int x,int y,int px,uint32_t color=FG,int max_width=0) {
-    c->setFont(px>=36?&fonts::FreeSans24pt7b:&fonts::FreeSans12pt7b);
-    c->setTextSize((float)px/(px>=36?48:24));c->setTextDatum(middle_center);
+    struct FontSlot {lgfx::PointerWrapper data;lgfx::VLWfont font;bool loaded=false;};
+    static FontSlot slots[sizeof(font_sizes)/sizeof(font_sizes[0])];
+    int index=0;
+    for(unsigned i=0;i<sizeof(font_sizes)/sizeof(font_sizes[0]);i++)if(font_sizes[i]<=px)index=i;
     if(px>=design::type::hero&&!max_width)max_width=260;
-    int width=c->textWidth(s);
-    if(max_width&&width>max_width)c->setTextSize((float)px/(px>=36?48:24)*max_width/width);
+    for(;;) {
+        if(font_sizes[index]==60&&std::strcmp(s,"Ready"))--index;
+        auto &slot=slots[index];
+        if(!slot.loaded) {slot.data.set(font_data[index]);configASSERT(slot.font.loadFont(&slot.data));slot.loaded=true;}
+        c->setFont(&slot.font);c->setTextSize(1);c->setTextDatum(middle_center);
+        if(!max_width||c->textWidth(s)<=max_width||index==0)break;
+        --index;
+    }
     c->setTextColor(mix(BG,color,(unsigned)(enter*255)));
     c->drawString(s,x,y+(y<design::button_top?(int)((1-enter)*12):0));
 }
@@ -92,6 +102,14 @@ static void highlights(const cw_flow_t &s,int y) {
 }
 void ui_draw(const cw_flow_t &s,const UiState &u) {
     c=&board_canvas();c->fillScreen(BG);
+    // Fixed top-center telemetry, outside page-entry motion.
+    float page_enter=enter;enter=1;
+    uint32_t battery_color=u.battery_percent>=0&&u.battery_percent<=15?ACCENT:MUTED;
+    c->drawRoundRect(195,24,28,14,3,battery_color);c->fillRect(224,28,3,6,battery_color);
+    if(u.battery_percent>=0)c->fillRect(198,27,22*u.battery_percent/100,8,battery_color);
+    if(u.battery_percent>=0)fmt(254,31,20,battery_color,"%d%%",u.battery_percent);
+    else text("--%",254,31,20,battery_color);
+    enter=page_enter;
     if(s.interrupted) {
         text("Brew interrupted",234,174,36);text(s.error[0]?s.error:"Scale disconnected",234,224,20,MUTED);
         text("Hold both to restart",234,303,19,ACCENT);return;
@@ -118,8 +136,8 @@ void ui_draw(const cw_flow_t &s,const UiState &u) {
         const char *caption=empty?(s.stable.active?"Empty server":"Place empty server"):
             (s.stable.active?"Beverage weight":"Remove server");
         if(s.stable.active) {
-            c->drawArc(234,233,210,207,0,360,LINE);
-            c->drawArc(234,233,210,207,270,270+360*std::min(1.f,s.stable.progress),ACCENT);
+            c->drawArc(234,233,194,191,0,360,LINE);
+            c->drawArc(234,233,194,191,270,270+360*std::min(1.f,s.stable.progress),ACCENT);
         }
         text(caption,234,146,design::type::body,MUTED);
         if(s.live_valid&&(empty||(s.live_cg<-3000&&weight>0)))fmt(225,236,design::type::hero,number_color(),"%.1f",weight/100.0);

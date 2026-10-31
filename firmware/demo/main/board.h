@@ -7,3 +7,5 @@ LGFX_Sprite &board_canvas();
 void board_present();
 void board_dump();
 void board_shutdown();
+// Estimated percentage from M5PM1 voltage, or -1 on read failure.
+int board_battery_percent();

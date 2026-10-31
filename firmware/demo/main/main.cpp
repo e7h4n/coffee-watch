@@ -145,10 +145,11 @@ static void console_task(void *arg) {
 extern "C" void app_main() {
     setvbuf(stdin,nullptr,_IONBF,0);ESP_ERROR_CHECK(nvs_flash_init());
     events=xQueueCreate(128,sizeof(demo_event_t));console_commands=xQueueCreate(4,sizeof(ConsoleCommand));configASSERT(events&&console_commands);
-    cw_init(&flow);board_init();ui_tick(flow,now_us());ui_draw(flow,ui);board_present();
+    cw_init(&flow);board_init();ui.battery_percent=board_battery_percent();ui_tick(flow,now_us());ui_draw(flow,ui);board_present();
     transport_init();xTaskCreate(console_task,"console",4096,nullptr,2,nullptr);
     ESP_LOGI("demo","coffee-watch-demo-v3; UI=%dx%d",(int)board_canvas().width(),(int)board_canvas().height());
-    int64_t last_draw=0,last_activity=now_us();
+    int64_t last_draw=0,last_activity=now_us(),last_battery=last_activity;
+    int battery_percent=ui.battery_percent;
     constexpr int64_t idle_limit_us=10LL*60*1000000;
     unsigned last_generation=flow.generation;
     auto last_phase=flow.scale.phase;
@@ -159,6 +160,10 @@ extern "C" void app_main() {
         BoardInput raw=board_input();
         if(raw.next||raw.select||(raw.touch_valid&&raw.touch))last_activity=now;
         input_tick(raw,now);
+        if(now-last_battery>=1000000) {
+            last_battery=now;battery_percent=board_battery_percent();
+        }
+        if(ui.battery_percent!=battery_percent) {ui.battery_percent=battery_percent;render_needed=true;}
         if(ui.carousel_dir) {
             float t=(now-animation_start)/(float)design::motion::carousel_us;
             if(t>=1) {

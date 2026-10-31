@@ -129,3 +129,15 @@ Ready breathing and waiting-arc animations, alongside the brewer carousel.
 Sensor values change immediately at their actual rounded value; animation never
 interpolates measurements or completes a business operation. UI animation also
 does not reset the global idle shutdown interval.
+
+## Fonts and battery
+
+The UI uses native-size grayscale-antialiased Noto Sans Medium fonts, not scaled
+monochrome bitmaps. Generated VLW data is committed; rebuilding it requires
+Pillow and `python3 tools/make_fonts.py` from this directory. Source font and OFL
+license are in `assets/fonts`.
+
+The top-center battery widget is present on every page. Its percentage follows
+the official StopWatch UserDemo M5PM1 voltage estimate (3300..4200mV, filtered),
+sampled once per second. It is an estimate, not a fuel-gauge measurement. A failed
+read shows --%; battery updates do not reset inactivity or change brew state.

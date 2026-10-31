@@ -190,3 +190,13 @@ void board_dump() {
 void board_shutdown() {
     configASSERT(pmic.shutdown()==M5PM1_OK);
 }
+
+int board_battery_percent() {
+    static uint16_t filtered_mv=0;
+    uint16_t mv=0;
+    if(pmic.readVbat(&mv)!=M5PM1_OK)return -1;
+    filtered_mv=filtered_mv?(filtered_mv*7u+mv+4u)/8u:mv;
+    if(filtered_mv<=3300)return 0;
+    if(filtered_mv>=4200)return 100;
+    return (filtered_mv-3300)*100u/900u;
+}

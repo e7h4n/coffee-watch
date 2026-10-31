@@ -13,26 +13,27 @@ foreground #e9eee8, secondary #8d9e93, accent #c9f27b, divider #334038, button
 
 ## Typography
 
-Sizes are renderer text sizes, not measured cap heights. M5GFX FreeSans fonts
-are shared across all pages. Use a maximum of two text weights/fonts.
+Fonts are OFL-licensed Noto Sans Medium, rendered as grayscale-antialiased VLW
+assets at native pixel sizes. No fractional scaling or magnification of monochrome
+bitmaps is used. `tools/make_fonts.py` reproduces the assets from the bundled font.
+Use native sizes 18, 20, 22, 26, 32, 34, 40, 46, 60, 64 and 90. Select the largest
+available size not exceeding the role size; step down whole font sizes to fit
+hero values (260px) and report columns (100px). Sizes 60/64/90 contain only the
+Ready/time/number glyph subsets used by their respective roles.
 
-| Role | Size | Use |
-| --- | --- | --- |
-| Hero number | 90 | Weight and added water |
-| Ready | 60 | Armed waiting state |
-| Time | 64 | Report brew time |
-| Result | 46 | TDS and extraction |
-| Status | 44 | Connection page |
-| Metric | 36 | Secondary values; adapt to the available column width |
-| Body | 26 | Weighing and water captions |
-| Label | 22 | Metric labels |
-| Action | 34 | Shared bottom button |
+Hero numbers use 90; Ready 60; report time 64; TDS/extraction 46; primary status
+40; labels 22; captions 26; actions 34. Mass and volume remain at one decimal;
+animation never interpolates a measurement.
 
-Keep mass and volume at one decimal. Never interpolate sensor values for a
-rolling-number effect: displayed values must retain their product precision.
-Hero values are constrained to 260px and report column values to 100px; text
-scales down when necessary to fit. Long values must also be checked against
-column width on the physical framebuffer.
+## Battery telemetry
+
+Every page displays a battery outline and percentage at the top center, y=31.
+Reserve y=20..44; stability rings use radius 194 to avoid the status area.
+Following the official StopWatch UserDemo, sample M5PM1 `readVbat` every second,
+filter voltage with 7/8 old + 1/8 new and rounded division, then map 3300..4200mV
+linearly to 0..100%, clamped. This is a voltage-based estimate, not a fuel gauge.
+Read errors show --% instead of inventing a value. Battery updates do not change
+business state or reset the 10-minute idle timer. No other device is queried.
 
 ## Components
 
