@@ -1,37 +1,54 @@
 # Coffee Watch
 
-**为手冲精品咖啡设计的咖啡助手。**
+**A coffee assistant designed for specialty pour-over brewing.**
 
-Coffee Watch 将 M5Stack StopWatch、蓝牙咖啡秤和浓度仪连接起来，通过一套特定的冲煮流程，快速读取多个设备的数据，自动计算并呈现一杯咖啡的冲煮结果，让记录自然融入冲煮过程。
+Coffee Watch connects an M5Stack StopWatch, a Bluetooth coffee scale, and a
+refractometer. A defined brewing workflow brings measurements from these devices
+together to calculate and present your brew data with minimal manual recording.
 
-## 从冲煮到报告
+## From brewing to a report
 
-1. **选择器具**：支持 V60、Hario Switch、AeroPress 和 Ceado Hoop。
-2. **称量空壶**：自动记录分享壶重量；粉量直接读取秤上预先保存的数据。
-3. **开始冲煮**：点击 Start，让秤进入 Auto READY；注水后跟随秤的事件自动开始计时，展示注水量与粉水比。
-4. **结算出液**：冲煮结束、移除滤杯触发 Stop 后，按提示拿走分享壶，自动计算出液量，无需再次手动去皮。
-5. **测量浓度**：用浓度仪测量咖啡，接收本次 TDS 数据。
-6. **查看报告**：汇总粉量、注水量、出液量、时间、粉水比、TDS、萃取率与单位粉量保水量，并展示 Golden Cup 图表。
+1. **Choose a brewer.** Select V60, Hario Switch, AeroPress, or Ceado Hoop.
+2. **Weigh the empty server.** Capture its mass automatically. Coffee dose comes
+   from the value you saved on the scale during bean preparation.
+3. **Start brewing.** Tap Start to arm Auto READY. Pouring starts the timer through
+   the scale's own event, while the watch displays added water and brew ratio.
+4. **Capture beverage mass.** After removing the dripper triggers Stop, follow the
+   prompt to lift the server. Beverage mass is calculated automatically without
+   another manual tare.
+5. **Measure TDS.** Measure your coffee with the refractometer to receive a fresh
+   concentration result.
+6. **Review the report.** See coffee dose, added water, beverage mass, brew time,
+   brew ratio, TDS, extraction yield, water retention per gram of coffee, and a
+   Golden Cup chart.
 
-重量和体积统一保留一位小数。萃取率使用实际出液量计算：
+Mass and volume use one decimal place. Extraction yield uses measured beverage
+mass:
 
 ```text
-萃取率（%） = TDS（%） × 出液量（g） ÷ 咖啡粉量（g）
+Extraction yield (%) = TDS (%) × beverage mass (g) / dry coffee dose (g)
 ```
 
-## 当前支持的设备
+On any screen, the StopWatch powers off after 10 minutes without interaction or
+state changes. Continuous weight updates and screen refreshes do not restart
+this interval.
 
-| 设备 | 用途 | 已验证版本 |
+## Supported hardware
+
+| Device | Role | Validated version |
 | --- | --- | --- |
-| M5Stack StopWatch | 交互、设备连接与结果展示 | ESP32-S3 |
-| BOOKOO Themis Ultra | 粉量、重量与冲煮计时 | 固件 4.0.1，Ratio + Auto 模式 |
-| DiFluid RS | TDS 测量 | 固件 v002-005 |
+| M5Stack StopWatch | Interaction, device connections, and reports | ESP32-S3 |
+| BOOKOO Themis Ultra | Coffee dose, weight, and brewing timer | Firmware 4.0.1, Ratio + Auto mode |
+| DiFluid RS | TDS measurement | Firmware v002-005 |
 
-目前是已完成实机冲煮验证的 prototype。固件连接配置中的两台设备，尚未提供通用设备选择界面。上述流程依赖对应设备和固件的事件行为，其他型号或版本尚未验证。
+This is a prototype with real brewing walkthroughs completed. The firmware
+connects to the two peers configured in its transport; a general device picker
+is not yet available. The workflow depends on the events provided by these
+devices and firmware versions. Other models and versions have not been validated.
 
-## 构建与使用
+## Build and use
 
-使用 ESP-IDF 5.5.x，在 `firmware/demo` 目录执行：
+With ESP-IDF 5.5.x activated, run from `firmware/demo`:
 
 ```sh
 python3 fetch_drivers.py
@@ -39,20 +56,25 @@ IDF_COMPONENT_MANAGER=0 idf.py build
 idf.py -p /dev/cu.YOUR_STOPWATCH_PORT flash
 ```
 
-首次构建会按固定提交下载 M5Stack 驱动。完整的设备准备、操作方式和烧录说明见 [固件使用指南](firmware/demo/README.md)。
+The driver helper downloads M5Stack drivers pinned to specific commits. See the
+[firmware guide](firmware/demo/README.md) for device preparation, controls,
+building, and flashing.
 
-## 开发文档
+## Development documentation
 
-- [产品流程与交互](spec/product.md)
-- [蓝牙接口](spec/bluetooth.md)
-- [验收清单](spec/acceptance.md)
-- [器具图形资源](spec/icons/)
-- [浏览器视觉原型](spec/prototype.html)：早期界面设计参考，使用模拟设备；流程以当前固件为准。
+- [Product behavior and interactions](spec/product.md)
+- [Bluetooth interfaces](spec/bluetooth.md)
+- [Acceptance checklist](spec/acceptance.md)
+- [Brewer artwork](spec/icons/)
+- [Browser visual prototype](spec/prototype.html): an early design reference with
+  simulated hardware. The current firmware defines the implemented workflow.
 
-在仓库根目录运行协议和状态机测试：
+Run protocol and state-machine tests from the repository root:
 
 ```sh
 python3 -m unittest discover -s tools -v
 ```
 
-测试需要 C 编译器；原生 AES 测试使用 macOS CommonCrypto，设备固件使用 ESP-IDF mbedTLS。构建产物、下载的驱动和本地抓包不纳入版本控制。
+Tests require a C compiler. The native AES harness uses macOS CommonCrypto;
+device firmware uses ESP-IDF mbedTLS. Build outputs, downloaded drivers, and local
+captures are excluded from version control.
