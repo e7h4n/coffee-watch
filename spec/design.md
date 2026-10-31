@@ -28,7 +28,7 @@ animation never interpolates a measurement.
 ## Battery telemetry
 
 Every page displays a battery outline and percentage at the top center, y=31.
-Reserve y=20..44; stability rings use radius 194 to avoid the status area.
+Reserve y=20..44; progress is displayed below the main number.
 Following the official StopWatch UserDemo, sample M5PM1 `readVbat` every second,
 filter voltage with 7/8 old + 1/8 new and rounded division, then map 3300..4200mV
 linearly to 0..100%, clamped. This is a voltage-based estimate, not a fuel gauge.
@@ -41,9 +41,11 @@ business state or reset the 10-minute idle timer. No other device is queried.
 - `field`: label and value pair for TDS and reports.
 - `bottom`: shared press treatment, enabled state and fixed action region.
 - `highlights`: identical TDS/extraction pair on numerical and chart reports.
-- Stability ring: progress from the notification-driven business window.
-- `waiting_mark`: small rotating arc for connection and TDS waiting.
-- Ready ring: subtle breathing outline; no fabricated progress or countdown.
+- Stability bar: 216×12px capsule at (126,306), gray #4b5350 track and green
+  elapsed portion. Both ends use analytic antialiasing at native resolution.
+  Its progress comes exclusively from the notification-driven business window.
+- Connection, initialization and TDS waits use their text status without spinners.
+- Ready: subtly breathing text color; no outline, fabricated progress or countdown.
 - Brewer carousel: cyclic positioning, scaling and easing with queued input.
 
 ## Motion
@@ -56,8 +58,7 @@ Animations request redraws only while active; all clocks are display-only.
 | Page entry | 240ms | Cubic ease-out, text fades in and rises 12px |
 | Value change | 180ms | Brief accent tint; exact number changes immediately |
 | Carousel | 380ms | Cubic ease-out movement and scaling |
-| Ready breathing | 2400ms | Low-contrast outline cycle |
-| Waiting arc | 1200ms | One full revolution |
+| Ready breathing | 2400ms | Subtle text-color cycle |
 
 No animation delays commands, completes operations, creates measurements, or
 changes the idle timer. Stability windows use real notifications only. An

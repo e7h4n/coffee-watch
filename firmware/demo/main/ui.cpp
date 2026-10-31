@@ -11,7 +11,6 @@
 static constexpr uint32_t BG=design::background,FG=design::foreground,MUTED=design::muted,ACCENT=design::accent,LINE=design::line,BUTTON=design::button;
 static uint32_t mix(uint32_t a,uint32_t b,unsigned alpha);
 static float enter=1.f,value_flash=0.f,breath=0.f;
-static int spinner_angle=0;
 static int64_t entered_us=0,changed_us=0;
 static int previous_page=-1;
 static int32_t previous_value=0;
@@ -72,14 +71,32 @@ bool ui_tick(const cw_flow_t &s,int64_t now) {
     bool numeric=s.stage==CW_EMPTY||s.stage==CW_PREP||s.stage==CW_BREW||s.stage==CW_BEVERAGE;
     value_flash=numeric?1-std::clamp((now-changed_us)/(float)design::motion::value_us,0.f,1.f):0;
     breath=.5f-.5f*std::cos((now%design::motion::breath_us)*6.2831853f/design::motion::breath_us);
-    spinner_angle=(int)((now%design::motion::spinner_us)*360/design::motion::spinner_us);
-    bool waiting=!s.interrupted&&(page==101||s.stage==CW_READY||s.stage==CW_TDS||s.write_pending||s.initial_step);
+    bool waiting=!s.interrupted&&s.stage==CW_READY;
     return enter<1||value_flash>0||waiting;
 }
 static uint32_t number_color() {return mix(FG,ACCENT,(unsigned)(value_flash*90));}
-static void waiting_mark() {
-    c->drawArc(234,307,9,7,0,360,LINE);
-    c->drawArc(234,307,9,7,spinner_angle,spinner_angle+90,ACCENT);
+// Analytic one-pixel coverage keeps capsule ends smooth at native resolution.
+static float capsule_coverage(float px,float py,float width,float height) {
+    if(width<=0)return 0;
+    float radius=std::min(width,height)*.5f;
+    float dx=std::abs(px-width*.5f)-(width*.5f-radius);
+    float dy=std::abs(py-height*.5f)-(height*.5f-radius);
+    float ax=std::max(dx,0.f),ay=std::max(dy,0.f);
+    float distance=std::sqrt(ax*ax+ay*ay)+std::min(std::max(dx,dy),0.f)-radius;
+    return std::clamp(.5f-distance,0.f,1.f);
+}
+static void stability_bar(float progress) {
+    constexpr int x=126,y=306,width=216,height=12;
+    constexpr uint32_t track=0x4b5350;
+    float filled=width*std::clamp(progress,0.f,1.f);
+    for(int py=-1;py<=height;py++)for(int px=-1;px<=width;px++) {
+        float a=capsule_coverage(px+.5f,py+.5f,width,height);
+        float b=capsule_coverage(px+.5f,py+.5f,filled,height);
+        if(a<=0&&b<=0)continue;
+        uint32_t color=mix(BG,track,(unsigned)(a*255));
+        color=mix(color,ACCENT,(unsigned)(b*255));
+        c->drawPixel(x+px,y+py,color);
+    }
 }
 bool ui_enabled(const cw_flow_t &s,int action) {
     if(s.interrupted||!s.scale_ready)return false;
@@ -115,11 +132,11 @@ void ui_draw(const cw_flow_t &s,const UiState &u) {
         text("Hold both to restart",234,303,19,ACCENT);return;
     }
     if(!s.scale_ready&&s.stage!=CW_REPORT&&s.stage!=CW_CHART&&s.stage!=CW_TDS) {
-        text("Connect scale",234,226,design::type::status);waiting_mark();if(s.error[0])text(s.error,234,290,18,MUTED);return;
+        text("Connect scale",234,226,design::type::status);if(s.error[0])text(s.error,234,290,18,MUTED);return;
     }
     char b[64];
     switch(s.stage) {
-    case CW_HOME:text("Connect scale",234,226,design::type::status);waiting_mark();break;
+    case CW_HOME:text("Connect scale",234,226,design::type::status);break;
     case CW_BREWER:
         if(u.carousel_dir) {
             for(int k=-2;k<=2;k++) {
@@ -135,12 +152,8 @@ void ui_draw(const cw_flow_t &s,const UiState &u) {
         int32_t weight=empty?s.live_cg:-s.live_cg-s.empty_cg;
         const char *caption=empty?(s.initial_step?"Preparing scale":(s.stable.active?"Empty server":"Place empty server")):
             (s.stable.active?"Beverage weight":"Remove server");
-        if(s.stable.active) {
-            c->drawArc(234,233,194,191,0,360,LINE);
-            c->drawArc(234,233,194,191,270,270+360*std::min(1.f,s.stable.progress),ACCENT);
-        }
+        if(s.stable.active)stability_bar(s.stable.progress);
         text(caption,234,146,design::type::body,MUTED);
-        if(s.initial_step)waiting_mark();
         if(s.live_valid&&(empty||(s.live_cg<-3000&&weight>0)))fmt(225,236,design::type::hero,number_color(),"%.1f",weight/100.0);
         else text("--",234,236,design::type::hero,MUTED);
         text("g",360,254,25,MUTED);
@@ -152,8 +165,7 @@ void ui_draw(const cw_flow_t &s,const UiState &u) {
         text("g",360,249,25,MUTED);
         bottom(s.scale.pending==BOOKOO_CMD_READY?"Starting...":"Start",ui_enabled(s,1),u.held==1);break;
     case CW_READY:
-        c->drawArc(234,233,177,175,0,360,mix(LINE,ACCENT,(unsigned)(breath*65)));
-        text("Ready",234,226,design::type::ready,ACCENT);break;
+        text("Ready",234,226,design::type::ready,mix(FG,ACCENT,150+(unsigned)(breath*105)));break;
     case CW_BREW: {
         int32_t water=s.scale.phase==BOOKOO_STOPPED?s.scale.result.water_cg:s.live_cg;
         text("Water",234,130,design::type::body,MUTED);fmt(213,206,design::type::hero,number_color(),"%.1f",water/100.0);text("ml",355,229,24,MUTED);
@@ -165,7 +177,7 @@ void ui_draw(const cw_flow_t &s,const UiState &u) {
         snprintf(b,sizeof b,"1:%.1f",(double)s.ratio);field("Brew ratio",b,317,143,39);
         snprintf(b,sizeof b,"%.1fg",s.beverage_cg/100.0);field("Beverage",b,151,246,39);
         text("Brew time",317,246,design::type::label,MUTED);time_text(s.scale.result.elapsed_ms,317,280,39);
-        waiting_mark();text("Waiting TDS",234,365,34);
+        text("Waiting TDS",234,365,34);
         if(!s.rs_ready)text("RS Disconnected",234,406,20,MUTED);
         else if(s.error[0])text(s.error,234,406,20,MUTED);
         break;

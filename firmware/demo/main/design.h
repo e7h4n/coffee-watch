@@ -11,6 +11,6 @@ constexpr int metric=36,result=46,button=34,time=64;
 }
 namespace motion {
 constexpr int frame_us=33000,enter_us=240000,value_us=180000;
-constexpr int carousel_us=380000,breath_us=2400000,spinner_us=1200000;
+constexpr int carousel_us=380000,breath_us=2400000;
 }
 }

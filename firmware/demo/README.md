@@ -39,7 +39,7 @@ Start serial capture before connecting BLE; closing USB can reset StopWatch.
    Keep the platform empty during initialization. After Preparing scale, the
    empty-server page is armed. If needed, Reset with the empty
    platform. Place the empty server; >10g and 5 continuous stable seconds capture
-   its measured mass. The ring follows the actual measurement window.
+   its measured mass. The rounded gray/green bar below the number follows the actual measurement window.
 5. Weigh and save the dose on the scale as part of bean preparation, even before
    powering on the watch. The watch reads the stored dose with official command
    14 / response 10, preserves it across UI navigation in the same connection,
@@ -126,8 +126,8 @@ updates, rendering and diagnostic status reads do not keep the device awake.
 
 The [visual system](../../spec/design.md) defines the current typography, color
 palette, components, layout limits and animation timings. `main/design.h` owns
-shared tokens. The renderer has display-only page entry, value-change tint,
-Ready breathing and waiting-arc animations, alongside the brewer carousel.
+shared tokens. The renderer has display-only page entry, value-change tint and
+Ready text-color breathing, alongside the brewer carousel.
 Sensor values change immediately at their actual rounded value; animation never
 interpolates measurements or completes a business operation. UI animation also
 does not reset the global idle shutdown interval.
