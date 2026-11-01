@@ -23,8 +23,9 @@
 // Private state belongs to one task. Public snapshots contain no credentials.
 typedef struct {char id[129],secret[97],refresh[2049],folder[65],file[65];} account_t;
 typedef struct {char state[24],error[40],code[16],url[81],folder[65];bool saved;uint32_t request;} public_t;
-typedef struct {cw_drive_command_t command;unsigned revision;} queued_command_t;
+typedef struct {cw_drive_command_t command;unsigned revision;bool brew;cw_brew_record_t record;} queued_command_t;
 static account_t account;
+static struct {char id[64],file[65],created[21];unsigned authorization_revision;} record_file;
 static public_t view;
 static portMUX_TYPE lock=portMUX_INITIALIZER_UNLOCKED;
 static QueueHandle_t commands;
@@ -182,6 +183,56 @@ static bool verify_drive(void) {
     snprintf(url,sizeof url,"https://www.googleapis.com/drive/v3/files/%s?alt=media",account.file);
     return http(url,HTTP_METHOD_GET,NULL,NULL,true)==200&&current()&&!strcmp(response,content);
 }
+static void record_status(const cw_brew_record_t *r,cw_record_sync_t state,const char *file,const char *error) {
+    cw_record_status_t status={.state=state,.revision=r->revision};
+    snprintf(status.id,sizeof status.id,"%s",r->id);snprintf(status.file,sizeof status.file,"%s",file?file:"");snprintf(status.error,sizeof status.error,"%s",error?error:"");
+    ESP_LOGI("record","id=%s revision=%u state=%u file=%s error=%s",status.id,status.revision,state,status.file,status.error);demo_record_status(&status);
+}
+static void upload_record(const cw_brew_record_t *r) {
+    char file[65]="",created[21]="",url[640],json[1536];const char *error=NULL;
+    record_status(r,CW_RECORD_SAVING,NULL,NULL);
+    if(!load()) {error="authorize_first";goto finished;}
+    if(!clock_ready()) {error="clock_sync_failed";goto finished;}
+    if(!current()) {error="authorization_changed";goto finished;}
+    if(!refresh()) {error="refresh_failed";goto finished;}
+    if(!ensure_folder()) {error="folder_unavailable";goto finished;}
+    bool exists=record_file.file[0]&&!strcmp(record_file.id,r->id);
+    if(exists) {
+        if(record_file.authorization_revision!=active_revision) {error="authorization_changed";goto finished;}
+        snprintf(file,sizeof file,"%s",record_file.file);snprintf(created,sizeof created,"%s",record_file.created);
+        snprintf(url,sizeof url,"https://www.googleapis.com/drive/v3/files/%s?fields=parents,trashed",file);
+        if(http(url,HTTP_METHOD_GET,NULL,NULL,true)!=200||!current()) {error="record_lookup_failed";goto finished;}
+        cJSON *metadata=cJSON_Parse(response),*parents=cJSON_GetObjectItemCaseSensitive(metadata,"parents"),*parent=cJSON_GetArrayItem(parents,0);
+        bool valid=cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(metadata,"trashed"))&&cJSON_GetArraySize(parents)==1&&cJSON_IsString(parent)&&!strcmp(parent->valuestring,account.folder);
+        cJSON_Delete(metadata);if(!valid) {error="record_metadata_invalid";goto finished;}
+    } else {
+        if(r->complete||r->revision!=1) {error="draft_not_found";goto finished;}
+        memset(&record_file,0,sizeof record_file);snprintf(record_file.id,sizeof record_file.id,"%s",r->id);record_file.authorization_revision=active_revision;
+        // Convert the sensor-event monotonic timestamp after SNTP establishes UTC.
+        struct timeval wall;gettimeofday(&wall,NULL);
+        time_t captured=(time_t)(((int64_t)wall.tv_sec*1000000+wall.tv_usec-esp_timer_get_time()+r->captured_us)/1000000);
+        struct tm utc;gmtime_r(&captured,&utc);strftime(created,sizeof created,"%Y-%m-%dT%H:%M:%SZ",&utc);
+        snprintf(record_file.created,sizeof record_file.created,"%s",created);
+    }
+    if(cw_record_json(r,created,json,sizeof json)<0) {error="record_invalid";goto finished;}
+    if(exists) {
+        snprintf(url,sizeof url,"https://www.googleapis.com/upload/drive/v3/files/%s?uploadType=media&fields=id",file);
+        if(http(url,HTTP_METHOD_PATCH,json,"application/json",true)!=200||!current()) {error="record_update_failed";goto finished;}
+        cJSON *reply=cJSON_Parse(response);char confirmed[65];bool ok=text_field(reply,"id",confirmed,sizeof confirmed)&&!strcmp(confirmed,file);cJSON_Delete(reply);
+        if(!ok) {error="record_response_invalid";goto finished;}
+    } else {
+        char body[2304];snprintf(body,sizeof body,"--coffee-record\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n{\"name\":\"brew-%s.json\",\"mimeType\":\"application/json\",\"parents\":[\"%s\"],\"appProperties\":{\"coffeeWatchRecord\":\"%s\",\"recordedAt\":\"%s\"}}\r\n--coffee-record\r\nContent-Type: application/json\r\n\r\n%s\r\n--coffee-record--\r\n",r->id,account.folder,r->id,created,json);
+        if(http("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id",HTTP_METHOD_POST,body,"multipart/related; boundary=coffee-record",true)!=200||!current()) {error="record_create_failed";goto finished;}
+        cJSON *reply=cJSON_Parse(response);bool ok=text_field(reply,"id",file,sizeof file)&&file_id(file);cJSON_Delete(reply);
+        if(!ok) {error="record_response_invalid";goto finished;}
+        snprintf(record_file.file,sizeof record_file.file,"%s",file);
+    }
+    // A saved indication requires the real uploaded document, not ATT or HTTP acceptance alone.
+    snprintf(url,sizeof url,"https://www.googleapis.com/drive/v3/files/%s?alt=media",file);
+    if(http(url,HTTP_METHOD_GET,NULL,NULL,true)!=200||!current()||strcmp(response,json))error="record_readback_failed";
+finished:
+    record_status(r,error?CW_RECORD_FAILED:CW_RECORD_SAVED,file,error);
+}
 static void finish_auth(void) {
     if(!store(false)) {set_state("failed","storage_error");return;}
     set_state("verifying",NULL);
@@ -224,6 +275,11 @@ static void drive_task(void *arg) {
         TickType_t wait=portMAX_DELAY;
         if(expires_us) {int64_t deadline=next_poll_us<expires_us?next_poll_us:expires_us;int64_t remaining=deadline-esp_timer_get_time();wait=remaining<=0?0:pdMS_TO_TICKS((remaining+999)/1000);}
         if(xQueueReceive(commands,&item,wait)==pdTRUE) {
+            if(item.brew) {
+                if(expires_us||item.revision!=atomic_load(&revision))record_status(&item.record,CW_RECORD_FAILED,NULL,"authorization_changed");
+                else {active_revision=item.revision;wipe_session();upload_record(&item.record);wipe_session();mbedtls_platform_zeroize(&account,sizeof account);}
+                mbedtls_platform_zeroize(&item,sizeof item);if(!expires_us&&uxQueueMessagesWaiting(commands)==0)atomic_store(&occupied,false);continue;
+            }
             active_revision=item.revision;wipe_session();
             cw_drive_command_t command=item.command;
             portENTER_CRITICAL(&lock);view.request=command.request;portEXIT_CRITICAL(&lock);
@@ -240,16 +296,23 @@ static void drive_task(void *arg) {
     }
 }
 void drive_setup_init(void) {
-    commands=xQueueCreate(2,sizeof(queued_command_t));configASSERT(commands);
+    commands=xQueueCreate(8,sizeof(queued_command_t));configASSERT(commands);
     esp_sntp_config_t config=ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");config.start=false;ESP_ERROR_CHECK(esp_netif_sntp_init(&config));
     configASSERT(xTaskCreate(drive_task,"drive-setup",12288,NULL,3,NULL)==pdPASS);
 }
 bool drive_setup_submit(const cw_drive_command_t *c) {
     if(c->op!=2&&atomic_exchange(&occupied,true))return false;
     if(c->op==2) {if(uxQueueMessagesWaiting(commands))return false;atomic_store(&occupied,true);}
-    queued_command_t item={.command=*c,.revision=atomic_fetch_add(&revision,1)+1};
+    queued_command_t item={.command=*c,.revision=c->op==3?atomic_load(&revision):atomic_fetch_add(&revision,1)+1};
     bool ok=xQueueSend(commands,&item,0)==pdTRUE;mbedtls_platform_zeroize(&item,sizeof item);
     if(!ok&&uxQueueMessagesWaiting(commands)==0)atomic_store(&occupied,false);
+    return ok;
+}
+bool drive_setup_record(const cw_brew_record_t *record) {
+    if(!atomic_load(&have_credentials)) {record_status(record,CW_RECORD_FAILED,NULL,"authorize_first");return false;}
+    queued_command_t item={.revision=atomic_load(&revision),.brew=true,.record=*record};
+    bool ok=xQueueSend(commands,&item,0)==pdTRUE;mbedtls_platform_zeroize(&item,sizeof item);
+    if(!ok)record_status(record,CW_RECORD_FAILED,NULL,"record_queue_full");
     return ok;
 }
 int drive_setup_status(char *out,int capacity) {

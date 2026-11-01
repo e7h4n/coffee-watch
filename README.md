@@ -101,6 +101,8 @@ Use a **TVs and Limited Input devices** client with Google Drive API enabled and
 the `drive.file` scope. Follow the displayed Google authorization link/code.
 
 A successful setup creates the watch's **Coffee Watch** folder and writes/reads
-`connection-check.json` before confirming read/write access. This release sets up
-Drive access; automatic brew uploads are not enabled. See [Drive setup](spec/drive.md)
+`connection-check.json` before confirming read/write access. The watch creates a
+brew JSON record when beverage weight is confirmed, then updates the same file
+when a valid TDS measurement arrives. See [Brew records](spec/brew-record.md) and
+[Drive setup](spec/drive.md)
 for configuration, token lifetime, local removal and storage details.

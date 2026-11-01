@@ -76,8 +76,9 @@ ATT acceptance, token acquisition and folder creation alone are insufficient.
 After reboot the UI reports **Authorization saved on watch**, not a claimed
 live connection. An explicit check loads the credentials, obtains a fresh access
 token, and performs the same write/read sequence. The browser provides a link
-to the returned folder. Brew record upload is not enabled by this setup feature;
-its record schema and trigger remain a separate product decision.
+to the returned folder. Brew records are uploaded automatically on confirmed beverage capture and
+updated on accepted TDS. See [Brew records](brew-record.md) for the schema and
+event contract.
 
 **Remove Drive from watch / cancel** erases the local namespace and leaves Drive
 files intact. It does not revoke all project-level Google authorizations. Revoke

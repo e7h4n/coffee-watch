@@ -144,6 +144,10 @@ void ui_draw(const cw_flow_t &s,const UiState &u) {
     if(u.battery_percent>=0)fmt(254,31,20,battery_color,"%d%%",u.battery_percent);
     else text("--%",254,31,20,battery_color);
     enter=page_enter;
+    if(!u.wifi_setup&&u.record_visible&&(s.stage==CW_TDS||s.stage==CW_REPORT||s.stage==CW_CHART)) {
+        const char *label=u.record.state==CW_RECORD_SAVING?"Drive: saving":u.record.state==CW_RECORD_SAVED?"Drive: saved":"Drive: save failed";
+        text(label,234,438,16,u.record.state==CW_RECORD_SAVED?ACCENT:MUTED);
+    }
     if(u.wifi_setup) {
         text("Wi-Fi setup",234,116,40);
         if(u.network.setup_active) {

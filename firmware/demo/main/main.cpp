@@ -7,6 +7,8 @@
 #include "esp_timer.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
+#include "esp_mac.h"
+#include "esp_random.h"
 #include <cstdio>
 #include <cstring>
 #include <cmath>
@@ -14,11 +16,13 @@ static QueueHandle_t events,console_commands;
 static cw_flow_t flow;
 static UiState ui;
 static unsigned rs_epoch;
+static cw_record_tracker_t records;
 static bool render_needed=true,rs_requested;
 static int64_t network_activity_us;
 static int64_t animation_start;
 static int queued[16];static unsigned queue_read,queue_write;
 extern "C" void demo_post(const demo_event_t *event) {configASSERT(xQueueSend(events,event,0)==pdTRUE);}
+extern "C" void demo_record_status(const cw_record_status_t *status) {demo_event_t e={};e.kind=DE_RECORD;e.us=esp_timer_get_time();e.data.record=*status;demo_post(&e);}
 static int64_t now_us() {return esp_timer_get_time();}
 static void go_home() {
     if(ui.wifi_setup)wifi_setup_close();
@@ -129,7 +133,17 @@ static void receive(const demo_event_t &e) {
     case DE_RS:if(e.epoch==rs_epoch)cw_rs_message(&flow,&e.data.rs,e.us);break;
     case DE_WRITE:if(e.generation==flow.generation)cw_write_done(&flow,e.success);break;
     case DE_WIFI:ui.network=e.data.network;network_activity_us=e.us;ESP_LOGI("network","state=%u setup=%u paired=%u saved=%u reason=%d",ui.network.state,ui.network.setup_active,ui.network.paired,ui.network.saved,ui.network.reason);break;
+    case DE_RECORD:
+        if(!strcmp(e.data.record.id,records.record.id)&&(!ui.record_visible||e.data.record.revision>=ui.record.revision)) {ui.record=e.data.record;ui.record_visible=true;network_activity_us=e.us;}
+        break;
     case DE_ERROR:snprintf(flow.error,sizeof flow.error,"%s",e.data.error);ESP_LOGE("flow","%s",flow.error);break;
+    }
+    if(e.kind==DE_SCALE||e.kind==DE_RS) {
+        cw_brew_record_t record;
+        if(cw_record_event(&records,before,&flow,e.us,&record)) {
+            cw_record_status_t pending={};pending.state=CW_RECORD_SAVING;pending.revision=record.revision;snprintf(pending.id,sizeof pending.id,"%s",record.id);ui.record=pending;ui.record_visible=true;
+            drive_setup_record(&record);
+        }
     }
     if(flow.stage==CW_TDS&&!rs_requested) {rs_requested=true;transport_find_rs();}
     if(before!=flow.stage) {
@@ -152,6 +166,8 @@ extern "C" void app_main() {
     setvbuf(stdin,nullptr,_IONBF,0);ESP_ERROR_CHECK(nvs_flash_init());
     events=xQueueCreate(128,sizeof(demo_event_t));console_commands=xQueueCreate(4,sizeof(ConsoleCommand));configASSERT(events&&console_commands);
     cw_init(&flow);board_init();ui.battery_percent=board_battery_percent();ui_tick(flow,now_us());ui_draw(flow,ui);board_present();
+    uint8_t mac[6];esp_read_mac(mac,ESP_MAC_WIFI_STA);char session[40];
+    snprintf(session,sizeof session,"%02x%02x%02x%02x%02x%02x-%08lx%08lx",mac[0],mac[1],mac[2],mac[3],mac[4],mac[5],(unsigned long)esp_random(),(unsigned long)esp_random());cw_record_init(&records,session);
     wifi_setup_init();transport_init();xTaskCreate(console_task,"console",4096,nullptr,2,nullptr);
     ESP_LOGI("demo","coffee-watch-demo-v3; UI=%dx%d",(int)board_canvas().width(),(int)board_canvas().height());
     int64_t last_draw=0,last_activity=now_us(),last_battery=last_activity;
