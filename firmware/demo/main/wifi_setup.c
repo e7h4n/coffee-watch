@@ -27,8 +27,11 @@ static uint8_t own_type;
 static uint16_t browser=BLE_HS_CONN_HANDLE_NONE,status_handle;
 static struct ble_npl_event control_event,notify_event;
 static QueueHandle_t network_queue;
+static esp_netif_t *station_interface;
+static char status_json[384];
+static int status_length;
 enum {OP_START=10,OP_DOWN,OP_IP};
-typedef struct {cw_wifi_packet_t packet;int op,reason;char ip[16];} network_command_t;
+typedef struct {cw_wifi_packet_t packet;int op,reason;uint32_t ip_address;char ip[16];} network_command_t;
 static const ble_uuid128_t service_uuid=BLE_UUID128_INIT(0x47,0xb6,0x99,0x76,0x4e,0x5b,0x21,0xa6,0x55,0x4f,0x9d,0x9a,0x01,0x10,0xa8,0xc9);
 static const ble_uuid128_t config_uuid=BLE_UUID128_INIT(0x47,0xb6,0x99,0x76,0x4e,0x5b,0x21,0xa6,0x55,0x4f,0x9d,0x9a,0x02,0x10,0xa8,0xc9);
 static const ble_uuid128_t status_uuid=BLE_UUID128_INIT(0x47,0xb6,0x99,0x76,0x4e,0x5b,0x21,0xa6,0x55,0x4f,0x9d,0x9a,0x03,0x10,0xa8,0xc9);
@@ -76,6 +79,7 @@ static bool connect_once(cw_wifi_packet_t *p) {
     mbedtls_platform_zeroize(&config,sizeof config);
     if(rc==ESP_OK)rc=esp_wifi_connect();
     network_state(rc==ESP_OK?CW_NET_CONNECTING:CW_NET_FAILED,rc,p->ssid,NULL);
+    if(rc!=ESP_OK)mbedtls_platform_zeroize(p->password,sizeof p->password);
     return rc==ESP_OK;
 }
 static void network_task(void *arg) {
@@ -111,6 +115,12 @@ static void network_task(void *arg) {
             else if(forgetting)forgetting=false;
             else {mbedtls_platform_zeroize(active.password,sizeof active.password);network_state(was_connecting?CW_NET_FAILED:CW_NET_DISCONNECTED,c.reason,NULL,NULL);}
         } else if(c.op==OP_IP&&!changing&&!forgetting&&attempt) {
+            // Reject an old network's queued IP event while changing credentials.
+            wifi_ap_record_t ap;esp_netif_ip_info_t current;
+            if(esp_wifi_sta_get_ap_info(&ap)!=ESP_OK||strcmp((const char*)ap.ssid,active.ssid)||
+               esp_netif_get_ip_info(station_interface,&current)!=ESP_OK||!current.ip.addr||current.ip.addr!=c.ip_address) {
+                mbedtls_platform_zeroize(&c,sizeof c);continue;
+            }
             // Only DHCP's real IP event confirms connection and commits credentials.
             esp_err_t rc=ESP_OK;
             if(credential_pending) {rc=save_credentials(&active);portENTER_CRITICAL(&lock);view.saved=rc==ESP_OK;portEXIT_CRITICAL(&lock);credential_pending=false;}
@@ -124,7 +134,7 @@ static void wifi_event(void *arg,esp_event_base_t base,int32_t id,void *data) {
     network_command_t c={0};
     if(base==WIFI_EVENT&&id==WIFI_EVENT_STA_START)c.op=OP_START;
     else if(base==WIFI_EVENT&&id==WIFI_EVENT_STA_DISCONNECTED) {c.op=OP_DOWN;c.reason=((wifi_event_sta_disconnected_t*)data)->reason;}
-    else if(base==IP_EVENT&&id==IP_EVENT_STA_GOT_IP) {c.op=OP_IP;ip_event_got_ip_t *e=data;snprintf(c.ip,sizeof c.ip,IPSTR,IP2STR(&e->ip_info.ip));}
+    else if(base==IP_EVENT&&id==IP_EVENT_STA_GOT_IP) {c.op=OP_IP;ip_event_got_ip_t *e=data;c.ip_address=e->ip_info.ip.addr;snprintf(c.ip,sizeof c.ip,IPSTR,IP2STR(&e->ip_info.ip));}
     else return;
     configASSERT(xQueueSend(network_queue,&c,0)==pdTRUE);
 }
@@ -135,7 +145,7 @@ static int access_config(uint16_t conn,uint16_t attr,struct ble_gatt_access_ctxt
     struct ble_gap_conn_desc desc;
     if(!snapshot().setup_active||conn!=browser||ble_gap_conn_find(conn,&desc)||!desc.sec_state.authenticated||!desc.sec_state.encrypted)return BLE_ATT_ERR_INSUFFICIENT_AUTHEN;
     uint8_t bytes[104];uint16_t size=0;network_command_t c={0};
-    if(ble_hs_mbuf_to_flat(ctx->om,bytes,sizeof bytes,&size))return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
+    if(ble_hs_mbuf_to_flat(ctx->om,bytes,sizeof bytes,&size)) {mbedtls_platform_zeroize(bytes,sizeof bytes);return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;}
     bool valid=cw_wifi_packet_decode(bytes,size,&c.packet);mbedtls_platform_zeroize(bytes,sizeof bytes);
     if(!valid)return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
     c.op=c.packet.op;bool queued=xQueueSend(network_queue,&c,0)==pdTRUE;mbedtls_platform_zeroize(&c,sizeof c);
@@ -144,9 +154,13 @@ static int access_config(uint16_t conn,uint16_t attr,struct ble_gatt_access_ctxt
 static int access_status(uint16_t conn,uint16_t attr,struct ble_gatt_access_ctxt *ctx,void *arg) {
     if(!snapshot().setup_active||conn!=browser)return BLE_ATT_ERR_INSUFFICIENT_AUTHEN;
     static const char *states[]={"unconfigured","connecting","connected","failed","disconnected"};
-    cw_network_view_t v=snapshot();char ssid[193],json[384];json_escape(ssid,v.ssid);
-    int n=snprintf(json,sizeof json,"{\"v\":1,\"state\":\"%s\",\"ssid\":\"%s\",\"ip\":\"%s\",\"reason\":%d,\"request\":%lu,\"saved\":%s}",states[v.state],ssid,v.ip,v.reason,(unsigned long)v.request_id,v.saved?"true":"false");
-    return os_mbuf_append(ctx->om,json,n)==0?0:BLE_ATT_ERR_INSUFFICIENT_RES;
+    if(ctx->offset&&!status_length)return BLE_ATT_ERR_INVALID_OFFSET;
+    // Keep one coherent JSON snapshot across all Read Blob fragments.
+    if(ctx->offset==0) {
+        cw_network_view_t v=snapshot();char ssid[193];json_escape(ssid,v.ssid);
+        status_length=snprintf(status_json,sizeof status_json,"{\"v\":1,\"state\":\"%s\",\"ssid\":\"%s\",\"ip\":\"%s\",\"reason\":%d,\"request\":%lu,\"saved\":%s}",states[v.state],ssid,v.ip,v.reason,(unsigned long)v.request_id,v.saved?"true":"false");
+    }
+    return os_mbuf_append(ctx->om,status_json,status_length)==0?0:BLE_ATT_ERR_INSUFFICIENT_RES;
 }
 static const struct ble_gatt_svc_def services[]={
     {.type=BLE_GATT_SVC_TYPE_PRIMARY,.uuid=&service_uuid.u,.characteristics=(struct ble_gatt_chr_def[]){
@@ -181,7 +195,7 @@ static int wifi_gap(struct ble_gap_event *e,void *arg) {
     if(e->type==BLE_GAP_EVENT_CONNECT) {
         if(!e->connect.status) {
             if(!snapshot().setup_active||!requested_open||browser!=BLE_HS_CONN_HANDLE_NONE)ble_gap_terminate(e->connect.conn_handle,BLE_ERR_REM_USER_CONN_TERM);
-            else {browser=e->connect.conn_handle;ble_gap_security_initiate(browser);}
+            else {status_length=0;browser=e->connect.conn_handle;ble_gap_security_initiate(browser);}
         }
         else if(snapshot().setup_active)advertise();
     } else if(e->type==BLE_GAP_EVENT_PASSKEY_ACTION&&e->passkey.params.action==BLE_SM_IOACT_DISP) {
@@ -193,7 +207,7 @@ static int wifi_gap(struct ble_gap_event *e,void *arg) {
         if(!paired)ble_gap_terminate(e->enc_change.conn_handle,BLE_ERR_REM_USER_CONN_TERM);
     } else if(e->type==BLE_GAP_EVENT_DISCONNECT) {
         if(e->disconnect.conn.conn_handle!=browser)return 0;
-        browser=BLE_HS_CONN_HANDLE_NONE;
+        browser=BLE_HS_CONN_HANDLE_NONE;status_length=0;
         if(requested_open) {
             if(snapshot().setup_active) {setup_state(true,false,true);advertise();}
             else control(NULL);
@@ -226,7 +240,7 @@ void wifi_setup_register(void) {
 void wifi_setup_init(void) {
     network_queue=xQueueCreate(8,sizeof(network_command_t));configASSERT(network_queue);
     ESP_ERROR_CHECK(esp_netif_init());ESP_ERROR_CHECK(esp_event_loop_create_default());
-    configASSERT(esp_netif_create_default_wifi_sta());
+    station_interface=esp_netif_create_default_wifi_sta();configASSERT(station_interface);
     wifi_init_config_t config=WIFI_INIT_CONFIG_DEFAULT();ESP_ERROR_CHECK(esp_wifi_init(&config));
     ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT,ESP_EVENT_ANY_ID,wifi_event,NULL));

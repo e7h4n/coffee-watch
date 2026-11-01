@@ -30,7 +30,8 @@ bool cw_wifi_packet_decode(const uint8_t *d,size_t n,cw_wifi_packet_t *out) {
             if(password==64&&!((c>='0'&&c<='9')||(c>='a'&&c<='f')||(c>='A'&&c<='F')))return false;
         }
     } else return false;
-    cw_wifi_packet_t p={.op=d[1],.request_id=(uint32_t)d[4]|(uint32_t)d[5]<<8|(uint32_t)d[6]<<16|(uint32_t)d[7]<<24};
-    if(!p.request_id)return false;
-    memcpy(p.ssid,d+8,ssid);memcpy(p.password,d+8+ssid,password);*out=p;return true;
+    uint32_t request=(uint32_t)d[4]|(uint32_t)d[5]<<8|(uint32_t)d[6]<<16|(uint32_t)d[7]<<24;
+    if(!request)return false;
+    memset(out,0,sizeof *out);out->op=d[1];out->request_id=request;
+    memcpy(out->ssid,d+8,ssid);memcpy(out->password,d+8+ssid,password);return true;
 }
