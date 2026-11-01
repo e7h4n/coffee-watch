@@ -29,6 +29,7 @@
         <div class="card-head"><div><div class="eyebrow">BLUETOOTH CONNECTION</div><h2 id="setup-title">Your StopWatch</h2></div><span id="connection-badge" class="badge">Not connected</span></div>
         <p id="device-name" class="device-name">Ready when your watch is.</p>
         <button id="connect" class="primary" type="button">Connect watch <span aria-hidden="true">↗</span></button>
+        <p id="error" class="error" role="alert" hidden></p>
         <p id="compatibility" class="hint">Use Chrome on a Bluetooth-enabled computer or Android device.</p>
         <div class="separator"></div>
         <form id="network-form" autocomplete="off">
@@ -43,7 +44,6 @@
         </form>
         <div id="network-status" class="network-status" role="status" aria-live="polite"><span class="status-dot"></span><div><strong id="status-title">Waiting for your watch</strong><p id="status-detail">Network details stay on your device.</p></div></div>
         <button id="forget" class="text-button" type="button" hidden>Forget saved network</button>
-        <p id="error" class="error" role="alert" hidden></p>
       </section>
     </main>
     <footer><p>Your password goes directly to the watch over authenticated Bluetooth.<br>It is never uploaded to GitHub or saved by this page.</p><a href="https://github.com/e7h4n/coffee-watch">Open-source brewing companion <span aria-hidden="true">↗</span></a></footer>

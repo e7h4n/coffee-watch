@@ -2,6 +2,7 @@
 export const SERVICE = 'c9a81001-9a9d-4f55-a621-5b4e7699b647';
 export const CONFIG = 'c9a81002-9a9d-4f55-a621-5b4e7699b647';
 export const STATUS = 'c9a81003-9a9d-4f55-a621-5b4e7699b647';
+export const SIGNAL = 'c9a81004-9a9d-4f55-a621-5b4e7699b647';
 const encoder = new TextEncoder();
 const requestId = () => crypto.getRandomValues(new Uint32Array(1))[0] || 1;
 export function joinPacket(ssid, password, id = requestId()) {
@@ -37,26 +38,31 @@ export class WatchConnection extends EventTarget {
     device.addEventListener('gattserverdisconnected', () => {
       if (epoch === this.epoch) {this.epoch++;this.pendingRequest = 0;this.queue = Promise.resolve();this.device = null;this.status = null;this.config = null;this.emit('disconnected');}
     }, {once: true});
+    let step = 'Connecting to watch';
     try {
+      this.emit('progress', step);
       const server = await device.gatt.connect();
+      step = 'Discovering Wi-Fi service';this.emit('progress', step);
       const service = await server.getPrimaryService(SERVICE);
       const config = await service.getCharacteristic(CONFIG);
       const status = await service.getCharacteristic(STATUS);
+      const signal = await service.getCharacteristic(SIGNAL);
       if (epoch !== this.epoch) throw new Error('Connection cancelled.');
       this.config = config;this.status = status;
       // This read requests authenticated encryption. Enter the watch's code
       // in the operating system's pairing dialog, never in this website.
+      step = 'Authenticating setup';this.emit('progress', step);
       await this.readStatus(epoch);
       if (epoch !== this.epoch) throw new Error('Connection cancelled.');
-      this.status.addEventListener('characteristicvaluechanged', event => {
-        // Native readValue() also emits this event. Only a one-byte notification
-        // is an invalidation signal; JSON read results must never trigger reads.
-        if (epoch === this.epoch && event.target.value.byteLength === 1) this.readStatus(epoch).catch(error => this.emit('error', error));
+      // Notifications have their own characteristic: readValue results can
+      // never be replaced by an invalidation byte in the platform BLE cache.
+      signal.addEventListener('characteristicvaluechanged', () => {
+        if (epoch === this.epoch) this.readStatus(epoch).catch(error => this.emit('error', error));
       });
-      await this.operation(() => {if (epoch !== this.epoch) throw new Error('Connection cancelled.');return status.startNotifications();});
+      await this.operation(() => {if (epoch !== this.epoch) throw new Error('Connection cancelled.');return signal.startNotifications();});
       // Snapshot after subscription closes the read/subscribe event boundary.
       await this.readStatus(epoch);this.emit('connected', device.name || 'Coffee Watch');
-    } catch (error) {if (epoch === this.epoch) this.disconnect();throw error;}
+    } catch (error) {if (epoch === this.epoch) this.disconnect();throw new Error(`${step}: ${error.message}`);}
   }
   async readStatus(epoch = this.epoch) {
     return this.operation(async () => {

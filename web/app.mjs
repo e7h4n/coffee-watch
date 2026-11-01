@@ -21,6 +21,7 @@ watch.addEventListener('connected', e => {
 watch.addEventListener('disconnected', () => {
   detached();status('Setup connection closed', 'Check the watch for network status. Open setup and connect again to make changes.');
 });
+watch.addEventListener('progress', e => {$('device-name').textContent = e.detail;badge.textContent = 'Connecting';});
 watch.addEventListener('error', e => error(e.detail.message));
 watch.addEventListener('status', e => {
   const v = e.detail;busy = v.state === 'connecting';controls();$('forget').hidden = !v.saved;

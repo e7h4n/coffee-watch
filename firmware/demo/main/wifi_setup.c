@@ -6,6 +6,7 @@
 #include <string.h>
 #include <stdatomic.h>
 #include "esp_event.h"
+#include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_random.h"
 #include "esp_wifi.h"
@@ -20,11 +21,13 @@
 #include "services/gap/ble_svc_gap.h"
 #include "services/gatt/ble_svc_gatt.h"
 
+void ble_store_config_init(void);
+
 static portMUX_TYPE lock=portMUX_INITIALIZER_UNLOCKED;
 static cw_network_view_t view;
 static atomic_bool ble_ready,requested_open;
 static uint8_t own_type;
-static uint16_t browser=BLE_HS_CONN_HANDLE_NONE,status_handle;
+static uint16_t browser=BLE_HS_CONN_HANDLE_NONE,signal_handle;
 static struct ble_npl_event control_event,notify_event;
 static QueueHandle_t network_queue;
 static esp_netif_t *station_interface;
@@ -35,6 +38,7 @@ typedef struct {cw_wifi_packet_t packet;int op,reason;uint32_t ip_address;char i
 static const ble_uuid128_t service_uuid=BLE_UUID128_INIT(0x47,0xb6,0x99,0x76,0x4e,0x5b,0x21,0xa6,0x55,0x4f,0x9d,0x9a,0x01,0x10,0xa8,0xc9);
 static const ble_uuid128_t config_uuid=BLE_UUID128_INIT(0x47,0xb6,0x99,0x76,0x4e,0x5b,0x21,0xa6,0x55,0x4f,0x9d,0x9a,0x02,0x10,0xa8,0xc9);
 static const ble_uuid128_t status_uuid=BLE_UUID128_INIT(0x47,0xb6,0x99,0x76,0x4e,0x5b,0x21,0xa6,0x55,0x4f,0x9d,0x9a,0x03,0x10,0xa8,0xc9);
+static const ble_uuid128_t signal_uuid=BLE_UUID128_INIT(0x47,0xb6,0x99,0x76,0x4e,0x5b,0x21,0xa6,0x55,0x4f,0x9d,0x9a,0x04,0x10,0xa8,0xc9);
 static cw_network_view_t snapshot(void) {cw_network_view_t v;portENTER_CRITICAL(&lock);v=view;portEXIT_CRITICAL(&lock);return v;}
 static void publish(void) {
     demo_event_t e={.kind=DE_WIFI,.us=esp_timer_get_time()};e.data.network=snapshot();demo_post(&e);
@@ -162,16 +166,18 @@ static int access_status(uint16_t conn,uint16_t attr,struct ble_gatt_access_ctxt
     }
     return os_mbuf_append(ctx->om,status_json,status_length)==0?0:BLE_ATT_ERR_INSUFFICIENT_RES;
 }
+static int access_signal(uint16_t conn,uint16_t attr,struct ble_gatt_access_ctxt *ctx,void *arg) {return BLE_ATT_ERR_READ_NOT_PERMITTED;}
 static const struct ble_gatt_svc_def services[]={
     {.type=BLE_GATT_SVC_TYPE_PRIMARY,.uuid=&service_uuid.u,.characteristics=(struct ble_gatt_chr_def[]){
         {.uuid=&config_uuid.u,.access_cb=access_config,.flags=BLE_GATT_CHR_F_WRITE|BLE_GATT_CHR_F_WRITE_ENC|BLE_GATT_CHR_F_WRITE_AUTHEN},
-        {.uuid=&status_uuid.u,.access_cb=access_status,.val_handle=&status_handle,.flags=BLE_GATT_CHR_F_READ|BLE_GATT_CHR_F_READ_ENC|BLE_GATT_CHR_F_READ_AUTHEN|BLE_GATT_CHR_F_NOTIFY},
+        {.uuid=&status_uuid.u,.access_cb=access_status,.flags=BLE_GATT_CHR_F_READ|BLE_GATT_CHR_F_READ_ENC|BLE_GATT_CHR_F_READ_AUTHEN},
+        {.uuid=&signal_uuid.u,.access_cb=access_signal,.val_handle=&signal_handle,.flags=BLE_GATT_CHR_F_NOTIFY},
         {0}}}, {0}};
 static void notify(struct ble_npl_event *e) {
     cw_network_view_t v=snapshot();
     if(browser!=BLE_HS_CONN_HANDLE_NONE&&v.paired) {
         uint8_t signal=v.state;struct os_mbuf *om=ble_hs_mbuf_from_flat(&signal,1);
-        if(om)ble_gatts_notify_custom(browser,status_handle,om);
+        if(om)ble_gatts_notify_custom(browser,signal_handle,om);
     }
 }
 static int wifi_gap(struct ble_gap_event *e,void *arg);
@@ -193,19 +199,22 @@ static void setup_state(bool active,bool paired,bool new_code) {
 }
 static int wifi_gap(struct ble_gap_event *e,void *arg) {
     if(e->type==BLE_GAP_EVENT_CONNECT) {
+        ESP_LOGI("wifi-setup","BLE connect status=%d",e->connect.status);
         if(!e->connect.status) {
             if(!snapshot().setup_active||!requested_open||browser!=BLE_HS_CONN_HANDLE_NONE)ble_gap_terminate(e->connect.conn_handle,BLE_ERR_REM_USER_CONN_TERM);
-            else {status_length=0;browser=e->connect.conn_handle;ble_gap_security_initiate(browser);}
+            else {status_length=0;browser=e->connect.conn_handle;int rc=ble_gap_security_initiate(browser);ESP_LOGI("wifi-setup","security request rc=%d",rc);}
         }
         else if(snapshot().setup_active)advertise();
     } else if(e->type==BLE_GAP_EVENT_PASSKEY_ACTION&&e->passkey.params.action==BLE_SM_IOACT_DISP) {
-        struct ble_sm_io key={.action=BLE_SM_IOACT_DISP,.passkey=snapshot().passkey};ble_sm_inject_io(e->passkey.conn_handle,&key);
+        struct ble_sm_io key={.action=BLE_SM_IOACT_DISP,.passkey=snapshot().passkey};int rc=ble_sm_inject_io(e->passkey.conn_handle,&key);ESP_LOGI("wifi-setup","display passkey action rc=%d",rc);
     } else if(e->type==BLE_GAP_EVENT_ENC_CHANGE) {
         struct ble_gap_conn_desc desc;
         bool paired=snapshot().setup_active&&requested_open&&!e->enc_change.status&&!ble_gap_conn_find(e->enc_change.conn_handle,&desc)&&desc.sec_state.encrypted&&desc.sec_state.authenticated;
+        ESP_LOGI("wifi-setup","encryption status=%d authenticated=%u",e->enc_change.status,paired);
         setup_state(snapshot().setup_active,paired,false);
         if(!paired)ble_gap_terminate(e->enc_change.conn_handle,BLE_ERR_REM_USER_CONN_TERM);
     } else if(e->type==BLE_GAP_EVENT_DISCONNECT) {
+        ESP_LOGI("wifi-setup","BLE disconnected reason=%d",e->disconnect.reason);
         if(e->disconnect.conn.conn_handle!=browser)return 0;
         browser=BLE_HS_CONN_HANDLE_NONE;status_length=0;
         if(requested_open) {
@@ -231,6 +240,8 @@ void wifi_setup_close(void) {requested_open=false;ble_npl_eventq_put(nimble_port
 void wifi_setup_reset(int reason) {ble_ready=false;requested_open=false;browser=BLE_HS_CONN_HANDLE_NONE;portENTER_CRITICAL(&lock);view.setup_error=reason;portEXIT_CRITICAL(&lock);setup_state(false,false,false);}
 void wifi_setup_synced(uint8_t type) {own_type=type;ble_ready=true;ble_npl_eventq_put(nimble_port_get_dflt_eventq(),&control_event);}
 void wifi_setup_register(void) {
+    /* SMP checks key-store capacity even for a non-bonding session. */
+    ble_store_config_init();
     ble_npl_event_init(&control_event,control,NULL);ble_npl_event_init(&notify_event,notify,NULL);
     ble_svc_gap_init();ble_svc_gatt_init();
     configASSERT(ble_gatts_count_cfg(services)==0);configASSERT(ble_gatts_add_svcs(services)==0);

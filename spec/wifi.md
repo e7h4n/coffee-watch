@@ -28,13 +28,16 @@ Forget saved network explicitly erases that namespace and disconnects Wi-Fi.
 | --- | --- | --- |
 | Service | c9a81001-9a9d-4f55-a621-5b4e7699b647 | Advertised only while setup is open |
 | Configuration | c9a81002-9a9d-4f55-a621-5b4e7699b647 | Authenticated encrypted write with response |
-| Status | c9a81003-9a9d-4f55-a621-5b4e7699b647 | Authenticated encrypted read / notify |
+| Status | c9a81003-9a9d-4f55-a621-5b4e7699b647 | Authenticated encrypted read |
+| State changed | c9a81004-9a9d-4f55-a621-5b4e7699b647 | Notify only |
 
 The watch is a temporary peripheral in addition to its normal scale/RS central
 role. NimBLE supports three connections and LE Secure Connections with MITM
 passkey pairing, display-only input capability, and no persistent bonds. A new
 code is generated for each setup opening or browser disconnect. Closing setup
 stops advertising and terminates its browser connection; Wi-Fi remains running.
+The standard NimBLE store callbacks are initialized before host startup because
+SMP checks storage capacity even when persistent bonding is disabled.
 Scale/RS connections are not owned by the provisioning GATT server.
 
 Configuration bytes:
@@ -54,10 +57,12 @@ zero request IDs are rejected. Configuration is write-only, never readable.
 
 A status read returns JSON with `v`, `state`, `ssid`, `ip`, `reason`, `request`
 and `saved`. States: unconfigured, connecting, connected, failed, disconnected.
-Each notification is a one-byte invalidation signal (the current state code);
-the browser serializes a fresh read after that notification. Native readValue
-also emits characteristicvaluechanged, so JSON read values must not trigger more
-reads. There is no status polling or automatic retry. Old request IDs cannot
+Each notification on the separate State changed characteristic is a one-byte
+invalidation signal (the current state code). The browser serializes a fresh
+read after that notification. The Status characteristic is read-only:
+notifications cannot replace its JSON value in the browser BLE cache. Only
+State changed events trigger reads. There is no status polling or automatic
+retry. Old request IDs cannot
 confirm the current configuration operation.
 
 ## Device state

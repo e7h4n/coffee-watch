@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {SERVICE, CONFIG, STATUS, joinPacket, forgetPacket, decodeStatus, WatchConnection} from './protocol.mjs';
+import {SERVICE, CONFIG, STATUS, SIGNAL, joinPacket, forgetPacket, decodeStatus, WatchConnection} from './protocol.mjs';
 const status = (state = 'unconfigured', request = 0) => new DataView(new TextEncoder().encode(JSON.stringify({v: 1, state, request, reason: 0, ssid: 'Cafe', ip: state === 'connected' ? '192.168.1.2' : '', saved: state === 'connected'})).buffer);
 test('wire bytes preserve UTF-8, spaces, request IDs and password boundaries', () => {
   const p = joinPacket(' Cafe ', 'password', 0x12345678);
@@ -27,24 +27,26 @@ class Characteristic extends EventTarget {
   signal() {this.value = new DataView(Uint8Array.of(1).buffer);this.dispatchEvent(new Event('characteristicvaluechanged'));}
 }
 function fakeDevice() {
-  const characteristic = new Characteristic(), device = new EventTarget();device.name = 'CoffeeWatch-test';
+  const characteristic = new Characteristic(), signal = new Characteristic(), device = new EventTarget();device.name = 'CoffeeWatch-test';
   const config = {async writeValueWithResponse(p) {this.last = new Uint8Array(p);}};
   device.gatt = {connected: false, async connect() {this.connected = true;return this;},
-    async getPrimaryService(uuid) {assert.equal(uuid, SERVICE);return {async getCharacteristic(id) {return id === CONFIG ? config : characteristic;}};},
+    async getPrimaryService(uuid) {assert.equal(uuid, SERVICE);return {async getCharacteristic(id) {assert.ok([CONFIG, STATUS, SIGNAL].includes(id));return id === CONFIG ? config : id === STATUS ? characteristic : signal;}};},
     disconnect() {this.connected = false;device.dispatchEvent(new Event('gattserverdisconnected'));}};
-  return {device, characteristic, config};
+  return {device, characteristic, signal, config};
 }
 test('reads do not create a notification/read loop; writes need fresh matching status', async () => {
-  const {device, characteristic, config} = fakeDevice();
+  const {device, characteristic, signal, config} = fakeDevice();
   const link = new WatchConnection({requestDevice: async options => {assert.equal(options.filters[0].services[0], SERVICE);return device;}});
   const received = [];link.addEventListener('status', e => received.push(e.detail));
-  await link.connect();assert.equal(characteristic.reads, 2);assert.equal(characteristic.notifications, true);
+  await link.connect();assert.equal(characteristic.reads, 2);assert.equal(characteristic.notifications, false);assert.equal(signal.notifications, true);
   received.length = 0;
   const packet = joinPacket('Cafe', 'password', 42);await link.write(packet);
   assert.equal(received.length, 0, 'old pre-request state must not count as the new operation');
   assert.ok(packet.every(x => x === 0));assert.equal(config.last[4], 42);
   characteristic.value = status('connecting', 42);await link.readStatus();assert.equal(received.at(-1).state, 'connecting');
   characteristic.value = status('connected', 42);await link.readStatus();assert.equal(received.at(-1).state, 'connected');
+  characteristic.value = status('connected', 42);signal.signal();await link.queue;
+  assert.equal(received.at(-1).state, 'connected');assert.equal(characteristic.reads, 6);
   assert.equal(link.pendingRequest, 0);
   link.disconnect();assert.equal(link.device, null);
 });
@@ -52,4 +54,25 @@ test('disconnection invalidates pending operations without a retry', async () =>
   const {device} = fakeDevice();const link = new WatchConnection({requestDevice: async () => device});
   await link.connect();link.disconnect();const packet = joinPacket('Cafe', 'password', 8);
   await assert.rejects(link.write(packet));assert.ok(packet.every(x => x === 0));
+});
+
+test('a state notification arriving during a JSON read cannot replace its response', async () => {
+  const {device, characteristic, signal} = fakeDevice();
+  const link = new WatchConnection({requestDevice: async () => device});
+  const received = [], errors = [];
+  link.addEventListener('status', e => received.push(e.detail));
+  link.addEventListener('error', e => errors.push(e.detail));
+  await link.connect();
+  let notifyDuringRead = true;
+  characteristic.value = status('connected');
+  characteristic.readValue = async () => {
+    characteristic.reads++;
+    if (notifyDuringRead) {notifyDuringRead = false;signal.signal();await Promise.resolve();}
+    return characteristic.value;
+  };
+  await link.readStatus();await link.queue;
+  assert.equal(received.at(-1).state, 'connected');
+  assert.equal(signal.value.byteLength, 1);
+  assert.deepEqual(errors, []);
+  link.disconnect();
 });
