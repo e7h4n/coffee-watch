@@ -164,3 +164,17 @@ in Auto Idle, 07 is a documented no-op. Done exit is event 04 when applicable.
 ATT success is dispatch status, never a tare-completed assertion. Only subsequent
 actual weight notifications can complete the independent 5-second empty-server
 capture rule. Mode query or write failure cannot advance capture.
+
+## Wi-Fi provisioning
+
+The idle screen has a Wi-Fi setup bottom action. Enter setup, open the
+[GitHub Pages setup page](https://e7h4n.github.io/coffee-watch/) in Chrome, pair
+using the watch's six-digit code if asked, and enter 2.4 GHz network details.
+Only a real IP event confirms success. Credentials are saved on the watch only
+after connection; no password is returned or logged. Close/Back stops BLE setup
+without shutting down Wi-Fi. Boot makes one attempt to join the saved network;
+there are no automatic reconnect loops or alternative provisioning paths.
+
+The custom 4 MiB factory partition keeps the original NVS/PHY offsets. Flash the
+complete project, including its partition table, when upgrading from an older
+firmware. See [the protocol and browser guide](../../spec/wifi.md).

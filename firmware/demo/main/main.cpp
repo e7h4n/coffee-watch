@@ -15,11 +15,13 @@ static cw_flow_t flow;
 static UiState ui;
 static unsigned rs_epoch;
 static bool render_needed=true,rs_requested;
+static int64_t network_activity_us;
 static int64_t animation_start;
 static int queued[16];static unsigned queue_read,queue_write;
 extern "C" void demo_post(const demo_event_t *event) {configASSERT(xQueueSend(events,event,0)==pdTRUE);}
 static int64_t now_us() {return esp_timer_get_time();}
 static void go_home() {
+    if(ui.wifi_setup)wifi_setup_close();
     if(flow.stage==CW_READY) {uint8_t b[6];if(cw_exit_ready_request(&flow,b))transport_write(b,flow.generation);}
     cw_home(&flow);transport_drop_rs();rs_requested=false;rs_epoch=0;
     if(!flow.scale_ready)transport_find_scale();
@@ -32,7 +34,9 @@ static void animate(int dir) {
     ui.carousel_dir=dir;ui.carousel_from=flow.brewer;ui.carousel_progress=0;animation_start=now_us();render_needed=true;
 }
 static void action(int which) {
-    if(!ui_enabled(flow,which)||ui.carousel_dir)return;
+    if(!ui_enabled(flow,which,&ui)||ui.carousel_dir)return;
+    if(ui.wifi_setup) {wifi_setup_close();ui.wifi_setup=false;ui.held=0;render_needed=true;return;}
+    if(which==1&&(flow.stage==CW_HOME||(!flow.scale_ready&&flow.stage==CW_BREWER))) {ui.wifi_setup=true;ui.held=0;wifi_setup_open();render_needed=true;return;}
     if(which==1&&flow.stage==CW_BREW&&flow.scale.phase==BOOKOO_STOPPED) {cw_revisit_stopped(&flow);return;}
     if(which==1&&flow.stage==CW_BREWER) {cw_choose(&flow,flow.brewer);return;}
     if(which==1&&flow.stage==CW_PREP) {
@@ -47,6 +51,7 @@ static void action(int which) {
     }
 }
 static void back() {
+    if(ui.wifi_setup) {wifi_setup_close();ui.wifi_setup=false;ui.held=0;render_needed=true;return;}
     cw_back(&flow);
     if(flow.back_pending&&!flow.scale.pending&&!flow.write_pending) {
         uint8_t b[6];bool dispatch=flow.stage==CW_READY?cw_exit_ready_request(&flow,b):cw_timer_request(&flow,BOOKOO_CMD_STOP,b);
@@ -82,24 +87,24 @@ static void input_tick(BoardInput raw,int64_t now) {
     } else {
         if(in.next&&!in.next_consumed&&now-in.next_start>=650000) {in.next_consumed=true;in.select_consumed=true;back();}
         if(!in.next&&prev_next&&!in.next_consumed&&in.next_gen==flow.generation) {
-            if(flow.stage==CW_BREWER)animate(1);
+            if(!ui.wifi_setup&&flow.stage==CW_BREWER)animate(1);
         }
         if(!in.select&&prev_select&&!in.select_consumed&&in.select_gen==flow.generation)action(1);
     }
     if(raw.touch&&!in.touch) {
         in.start_x=in.last_x=raw.x;in.start_y=in.last_y=raw.y;in.touch_gen=flow.generation;
-        in.touch_action=ui.carousel_dir?0:ui_hit(flow,raw.x,raw.y);in.touch_cancel=ui.carousel_dir&&raw.y>=354;
+        in.touch_action=ui.carousel_dir?0:ui_hit(flow,raw.x,raw.y,&ui);in.touch_cancel=ui.carousel_dir&&raw.y>=354;
     }
     if(raw.touch) {
         in.last_x=raw.x;in.last_y=raw.y;
-        if(in.touch_action&&ui_hit(flow,raw.x,raw.y)!=in.touch_action)in.touch_cancel=true;
+        if(in.touch_action&&ui_hit(flow,raw.x,raw.y,&ui)!=in.touch_action)in.touch_cancel=true;
         if(in.touch_gen!=flow.generation)in.touch_cancel=true;
     }
     if(!raw.touch&&in.touch&&in.touch_gen==flow.generation) {
         if(in.touch_action) {if(!in.touch_cancel)action(in.touch_action);}
         else if(!in.touch_cancel) {
             int dx=in.last_x-in.start_x,dy=in.last_y-in.start_y;
-            if(std::abs(dx)>50&&std::abs(dx)>std::abs(dy)) {
+            if(!ui.wifi_setup&&std::abs(dx)>50&&std::abs(dx)>std::abs(dy)) {
                 if(flow.stage==CW_BREWER)animate(dx<0?1:-1);
                 else if(flow.stage==CW_REPORT||flow.stage==CW_CHART) {flow.stage=flow.stage==CW_REPORT?CW_CHART:CW_REPORT;flow.generation++;}
             }
@@ -108,7 +113,7 @@ static void input_tick(BoardInput raw,int64_t now) {
     in.touch=raw.touch;
     int old=ui.held;ui.held=0;
     if(!in.chord) {
-        if(in.select&&!in.select_consumed&&in.select_gen==flow.generation) {int a=1;if(ui_enabled(flow,a))ui.held=a;}
+        if(in.select&&!in.select_consumed&&in.select_gen==flow.generation) {int a=1;if(ui_enabled(flow,a,&ui))ui.held=a;}
         if(in.touch&&!in.touch_cancel&&in.touch_gen==flow.generation)ui.held=in.touch_action;
     }
     if(old!=ui.held||prev_next!=in.next||prev_select!=in.select||raw.touch!=old_touch||old_gen!=flow.generation)render_needed=true;
@@ -123,6 +128,7 @@ static void receive(const demo_event_t &e) {
     case DE_SCALE:cw_scale_message(&flow,e.epoch,&e.data.scale,e.us);break;
     case DE_RS:if(e.epoch==rs_epoch)cw_rs_message(&flow,&e.data.rs,e.us);break;
     case DE_WRITE:if(e.generation==flow.generation)cw_write_done(&flow,e.success);break;
+    case DE_WIFI:ui.network=e.data.network;network_activity_us=e.us;ESP_LOGI("network","state=%u setup=%u paired=%u saved=%u reason=%d",ui.network.state,ui.network.setup_active,ui.network.paired,ui.network.saved,ui.network.reason);break;
     case DE_ERROR:snprintf(flow.error,sizeof flow.error,"%s",e.data.error);ESP_LOGE("flow","%s",flow.error);break;
     }
     if(flow.stage==CW_TDS&&!rs_requested) {rs_requested=true;transport_find_rs();}
@@ -146,7 +152,7 @@ extern "C" void app_main() {
     setvbuf(stdin,nullptr,_IONBF,0);ESP_ERROR_CHECK(nvs_flash_init());
     events=xQueueCreate(128,sizeof(demo_event_t));console_commands=xQueueCreate(4,sizeof(ConsoleCommand));configASSERT(events&&console_commands);
     cw_init(&flow);board_init();ui.battery_percent=board_battery_percent();ui_tick(flow,now_us());ui_draw(flow,ui);board_present();
-    transport_init();xTaskCreate(console_task,"console",4096,nullptr,2,nullptr);
+    wifi_setup_init();transport_init();xTaskCreate(console_task,"console",4096,nullptr,2,nullptr);
     ESP_LOGI("demo","coffee-watch-demo-v3; UI=%dx%d",(int)board_canvas().width(),(int)board_canvas().height());
     int64_t last_draw=0,last_activity=now_us(),last_battery=last_activity;
     int battery_percent=ui.battery_percent;
@@ -175,6 +181,7 @@ extern "C" void app_main() {
         ConsoleCommand cmd;
         if(xQueueReceive(console_commands,&cmd,0)==pdTRUE) {
             if(!strcmp(cmd.line,"screen"))board_dump();
+            else if(!strcmp(cmd.line,"netstatus"))printf("NETWORK state=%u setup=%u paired=%u saved=%u reason=%d setup_error=%d\n",ui.network.state,ui.network.setup_active,ui.network.paired,ui.network.saved,ui.network.reason,ui.network.setup_error);
             else if(!strcmp(cmd.line,"status"))printf("STATUS stage=%u generation=%u scale=%u rs=%u phase=%u dose_valid=%u dose_cg=%ld weight_cg=%ld empty_cg=%ld beverage_cg=%ld\n",flow.stage,flow.generation,flow.scale_ready,flow.rs_ready,flow.scale.phase,flow.scale.dose_valid,(long)flow.scale.dose_cg,(long)flow.live_cg,(long)flow.empty_cg,(long)flow.beverage_cg);
             else if(!strcmp(cmd.line,"home")) {last_activity=now;go_home();}
             else if(!strcmp(cmd.line,"next")) {last_activity=now;animate(1);}
@@ -190,6 +197,7 @@ extern "C" void app_main() {
         }
         uint8_t initial_packet[6];
         if(cw_initial_request(&flow,initial_packet)) {ESP_LOGI("flow","Scale initialization command=%02X param=%02X",initial_packet[2],initial_packet[3]);transport_write(initial_packet,flow.generation);}
+        if(network_activity_us>last_activity)last_activity=network_activity_us;
         // Global product idle policy. Weight updates and repainting are not activity.
         if(now-last_activity>=idle_limit_us) {
             ESP_LOGI("demo","No interaction or state change for 10 minutes; shutting down");

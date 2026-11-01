@@ -84,3 +84,12 @@ in Auto Idle, 07 is a documented no-op. Done exit is event 04 when applicable.
 ATT success is dispatch status, never a tare-completed assertion. Only subsequent
 actual weight notifications can complete the independent 5-second empty-server
 capture rule. Mode query or write failure cannot advance capture.
+
+## Wi-Fi settings
+
+Only the idle connection screen offers a Wi-Fi setup bottom action. Settings are
+a modal screen with a six-digit Bluetooth pairing code, network status and Close
+action. Chrome's static setup page writes credentials over authenticated BLE.
+The scale may connect behind the modal; closing settings reveals normal brewing
+navigation. Wi-Fi is independent of scale/RS measurements and remains on after
+setup closes. Detailed behavior and protocol are specified in wifi.md.

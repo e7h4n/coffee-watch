@@ -114,7 +114,8 @@ static void stability_bar(float progress) {
         c->drawPixel(x+px,y+py,color);
     }
 }
-bool ui_enabled(const cw_flow_t &s,int action) {
+bool ui_enabled(const cw_flow_t &s,int action,const UiState *u) {
+    if((u&&u->wifi_setup)||s.stage==CW_HOME||(!s.scale_ready&&s.stage==CW_BREWER))return action==1;
     if(s.interrupted||!s.scale_ready)return false;
     if(action==1) {
         if(s.stage==CW_BREWER)return true;
@@ -125,9 +126,9 @@ bool ui_enabled(const cw_flow_t &s,int action) {
         return s.scale.phase==BOOKOO_IDLE&&s.scale.dose_valid&&s.empty_valid;
     return false;
 }
-int ui_hit(const cw_flow_t &s,int x,int y) {
+int ui_hit(const cw_flow_t &s,int x,int y,const UiState *u) {
     if((x-234)*(x-234)+(y-233)*(y-233)>233*233)return 0;
-    return y>=design::button_top&&ui_enabled(s,1)?1:0;
+    return y>=design::button_top&&ui_enabled(s,1,u)?1:0;
 }
 static void highlights(const cw_flow_t &s,int y) {
     text("TDS",150,y,design::type::label,MUTED);text("Extraction",318,y,design::type::label,MUTED);
@@ -143,16 +144,27 @@ void ui_draw(const cw_flow_t &s,const UiState &u) {
     if(u.battery_percent>=0)fmt(254,31,20,battery_color,"%d%%",u.battery_percent);
     else text("--%",254,31,20,battery_color);
     enter=page_enter;
+    if(u.wifi_setup) {
+        text("Wi-Fi setup",234,116,40);
+        if(u.network.setup_active) {
+            text(u.network.paired?"Browser paired":"Pairing code",234,174,22,MUTED);
+            fmt(234,229,90,FG,"%06u",u.network.passkey);
+        } else text(u.network.setup_error?"Bluetooth unavailable":"Opening setup",234,229,32,MUTED);
+        const char *states[]={"Not configured","Connecting","Connected","Connection failed","Disconnected"};
+        text(states[u.network.state],234,296,26,u.network.state==CW_NET_CONNECTED?ACCENT:MUTED);
+        if(u.network.state==CW_NET_CONNECTED)text(u.network.ip,234,326,20,MUTED);
+        bottom("Close",true,u.held==1);return;
+    }
     if(s.interrupted) {
         text("Brew interrupted",234,174,36);text(s.error[0]?s.error:"Scale disconnected",234,224,20,MUTED);
         text("Hold both to restart",234,303,19,ACCENT);return;
     }
     if(!s.scale_ready&&s.stage!=CW_REPORT&&s.stage!=CW_CHART&&s.stage!=CW_TDS) {
-        text("Connect scale",design::center_x,design::center_y,design::type::status,FG,0,true);if(s.error[0])text(s.error,234,290,18,MUTED);return;
+        text("Connect scale",design::center_x,design::center_y,design::type::status,FG,0,true);bottom("Wi-Fi setup",true,u.held==1);if(s.error[0])text(s.error,234,290,18,MUTED);return;
     }
     char b[64];
     switch(s.stage) {
-    case CW_HOME:text("Connect scale",design::center_x,design::center_y,design::type::status,FG,0,true);break;
+    case CW_HOME:text("Connect scale",design::center_x,design::center_y,design::type::status,FG,0,true);bottom("Wi-Fi setup",true,u.held==1);break;
     case CW_BREWER:
         if(u.carousel_dir) {
             for(int k=-2;k<=2;k++) {

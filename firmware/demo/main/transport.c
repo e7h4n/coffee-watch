@@ -204,8 +204,9 @@ void transport_find_scale(void) {submit((command_t){.op=0});}
 void transport_find_rs(void) {submit((command_t){.op=1});}
 void transport_drop_rs(void) {submit((command_t){.op=3});}
 void transport_write(const uint8_t packet[6],unsigned generation) {command_t c={.op=2,.generation=generation};memcpy(c.packet,packet,6);submit(c);}
-static void sync_host(void) {int rc=ble_hs_util_ensure_addr(0);if(!rc)rc=ble_hs_id_infer_auto(0,&own_type);if(rc) {fail("BLE sync",rc);return;}synced=true;transport_find_scale();}
+static void sync_host(void) {int rc=ble_hs_util_ensure_addr(0);if(!rc)rc=ble_hs_id_infer_auto(0,&own_type);if(rc) {fail("BLE sync",rc);return;}synced=true;wifi_setup_synced(own_type);transport_find_scale();}
 static void reset_host(int reason) {
+    wifi_setup_reset(reason);
     synced=false;seeking=-1;writing=false;
     for(unsigned i=0;i<2;i++)if(peers[i].connected) {peers[i].connected=peers[i].ready=false;rs_stream_reset(&peers[i].stream);link(&peers[i],false);}
     fail("BLE host reset",reason);
@@ -213,6 +214,6 @@ static void reset_host(int reason) {
 static void host(void *arg) {nimble_port_run();nimble_port_freertos_deinit();}
 void transport_init(void) {
     commands=xQueueCreate(8,sizeof(command_t));configASSERT(commands);
-    ESP_ERROR_CHECK(nimble_port_init());ble_npl_event_init(&command_event,execute,NULL);
+    ESP_ERROR_CHECK(nimble_port_init());wifi_setup_register();ble_npl_event_init(&command_event,execute,NULL);
     ble_hs_cfg.sync_cb=sync_host;ble_hs_cfg.reset_cb=reset_host;nimble_port_freertos_init(host);
 }
