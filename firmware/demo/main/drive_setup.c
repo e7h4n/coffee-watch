@@ -69,7 +69,7 @@ static bool clock_ready(void) {
 }
 static int http(const char *url,esp_http_client_method_t method,const char *body,const char *type,bool authorized) {
     mbedtls_platform_zeroize(response,sizeof response);
-    esp_http_client_config_t cfg={.url=url,.timeout_ms=15000,.crt_bundle_attach=esp_crt_bundle_attach,.disable_auto_redirect=true,.buffer_size=2048};
+    esp_http_client_config_t cfg={.url=url,.timeout_ms=15000,.crt_bundle_attach=esp_crt_bundle_attach,.disable_auto_redirect=true,.buffer_size=2048,.buffer_size_tx=4096};
     esp_http_client_handle_t h=esp_http_client_init(&cfg);if(!h)return -1;
     esp_http_client_set_method(h,method);
     if(type)esp_http_client_set_header(h,"Content-Type",type);
