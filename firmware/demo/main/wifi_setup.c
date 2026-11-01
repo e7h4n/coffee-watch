@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "wifi_setup.h"
 #include "wifi_packet.h"
+#include "drive_setup.h"
 #include "demo.h"
 #include <stdio.h>
 #include <string.h>
@@ -33,16 +34,22 @@ static QueueHandle_t network_queue;
 static esp_netif_t *station_interface;
 static char status_json[384];
 static int status_length;
+static char drive_json[512];static int drive_length;
 enum {OP_START=10,OP_DOWN,OP_IP};
 typedef struct {cw_wifi_packet_t packet;int op,reason;uint32_t ip_address;char ip[16];} network_command_t;
 static const ble_uuid128_t service_uuid=BLE_UUID128_INIT(0x47,0xb6,0x99,0x76,0x4e,0x5b,0x21,0xa6,0x55,0x4f,0x9d,0x9a,0x01,0x10,0xa8,0xc9);
 static const ble_uuid128_t config_uuid=BLE_UUID128_INIT(0x47,0xb6,0x99,0x76,0x4e,0x5b,0x21,0xa6,0x55,0x4f,0x9d,0x9a,0x02,0x10,0xa8,0xc9);
 static const ble_uuid128_t status_uuid=BLE_UUID128_INIT(0x47,0xb6,0x99,0x76,0x4e,0x5b,0x21,0xa6,0x55,0x4f,0x9d,0x9a,0x03,0x10,0xa8,0xc9);
 static const ble_uuid128_t signal_uuid=BLE_UUID128_INIT(0x47,0xb6,0x99,0x76,0x4e,0x5b,0x21,0xa6,0x55,0x4f,0x9d,0x9a,0x04,0x10,0xa8,0xc9);
+static const ble_uuid128_t drive_config_uuid=BLE_UUID128_INIT(0x47,0xb6,0x99,0x76,0x4e,0x5b,0x21,0xa6,0x55,0x4f,0x9d,0x9a,0x05,0x10,0xa8,0xc9);
+static const ble_uuid128_t drive_status_uuid=BLE_UUID128_INIT(0x47,0xb6,0x99,0x76,0x4e,0x5b,0x21,0xa6,0x55,0x4f,0x9d,0x9a,0x06,0x10,0xa8,0xc9);
 static cw_network_view_t snapshot(void) {cw_network_view_t v;portENTER_CRITICAL(&lock);v=view;portEXIT_CRITICAL(&lock);return v;}
 static void publish(void) {
     demo_event_t e={.kind=DE_WIFI,.us=esp_timer_get_time()};e.data.network=snapshot();demo_post(&e);
     if(ble_ready)ble_npl_eventq_put(nimble_port_get_dflt_eventq(),&notify_event);
+}
+void wifi_setup_drive_changed(const char *state) {
+    portENTER_CRITICAL(&lock);snprintf(view.drive_state,sizeof view.drive_state,"%s",state);portEXIT_CRITICAL(&lock);publish();
 }
 static void network_state(cw_net_state_t state,int reason,const char *ssid,const char *ip) {
     portENTER_CRITICAL(&lock);view.state=state;view.reason=reason;
@@ -166,12 +173,30 @@ static int access_status(uint16_t conn,uint16_t attr,struct ble_gatt_access_ctxt
     }
     return os_mbuf_append(ctx->om,status_json,status_length)==0?0:BLE_ATT_ERR_INSUFFICIENT_RES;
 }
+static int access_drive_config(uint16_t conn,uint16_t attr,struct ble_gatt_access_ctxt *ctx,void *arg) {
+    struct ble_gap_conn_desc desc;
+    if(!snapshot().setup_active||conn!=browser||ble_gap_conn_find(conn,&desc)||!desc.sec_state.authenticated||!desc.sec_state.encrypted)return BLE_ATT_ERR_INSUFFICIENT_AUTHEN;
+    uint8_t bytes[CW_DRIVE_PACKET_MAX];uint16_t size=0;cw_drive_command_t command={0};
+    if(ble_hs_mbuf_to_flat(ctx->om,bytes,sizeof bytes,&size)) {mbedtls_platform_zeroize(bytes,sizeof bytes);return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;}
+    bool valid=cw_drive_packet_decode(bytes,size,&command);mbedtls_platform_zeroize(bytes,sizeof bytes);
+    if(!valid)return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
+    bool queued=drive_setup_submit(&command);mbedtls_platform_zeroize(&command,sizeof command);return queued?0:BLE_ATT_ERR_INSUFFICIENT_RES;
+}
+static int access_drive_status(uint16_t conn,uint16_t attr,struct ble_gatt_access_ctxt *ctx,void *arg) {
+    if(!snapshot().setup_active||conn!=browser)return BLE_ATT_ERR_INSUFFICIENT_AUTHEN;
+    if(ctx->offset&&!drive_length)return BLE_ATT_ERR_INVALID_OFFSET;
+    if(!ctx->offset)drive_length=drive_setup_status(drive_json,sizeof drive_json);
+    if(drive_length<=0)return BLE_ATT_ERR_INSUFFICIENT_RES;
+    return os_mbuf_append(ctx->om,drive_json,drive_length)==0?0:BLE_ATT_ERR_INSUFFICIENT_RES;
+}
 static int access_signal(uint16_t conn,uint16_t attr,struct ble_gatt_access_ctxt *ctx,void *arg) {return BLE_ATT_ERR_READ_NOT_PERMITTED;}
 static const struct ble_gatt_svc_def services[]={
     {.type=BLE_GATT_SVC_TYPE_PRIMARY,.uuid=&service_uuid.u,.characteristics=(struct ble_gatt_chr_def[]){
         {.uuid=&config_uuid.u,.access_cb=access_config,.flags=BLE_GATT_CHR_F_WRITE|BLE_GATT_CHR_F_WRITE_ENC|BLE_GATT_CHR_F_WRITE_AUTHEN},
         {.uuid=&status_uuid.u,.access_cb=access_status,.flags=BLE_GATT_CHR_F_READ|BLE_GATT_CHR_F_READ_ENC|BLE_GATT_CHR_F_READ_AUTHEN},
         {.uuid=&signal_uuid.u,.access_cb=access_signal,.val_handle=&signal_handle,.flags=BLE_GATT_CHR_F_NOTIFY},
+        {.uuid=&drive_config_uuid.u,.access_cb=access_drive_config,.flags=BLE_GATT_CHR_F_WRITE|BLE_GATT_CHR_F_WRITE_ENC|BLE_GATT_CHR_F_WRITE_AUTHEN},
+        {.uuid=&drive_status_uuid.u,.access_cb=access_drive_status,.flags=BLE_GATT_CHR_F_READ|BLE_GATT_CHR_F_READ_ENC|BLE_GATT_CHR_F_READ_AUTHEN},
         {0}}}, {0}};
 static void notify(struct ble_npl_event *e) {
     cw_network_view_t v=snapshot();
@@ -202,7 +227,7 @@ static int wifi_gap(struct ble_gap_event *e,void *arg) {
         ESP_LOGI("wifi-setup","BLE connect status=%d",e->connect.status);
         if(!e->connect.status) {
             if(!snapshot().setup_active||!requested_open||browser!=BLE_HS_CONN_HANDLE_NONE)ble_gap_terminate(e->connect.conn_handle,BLE_ERR_REM_USER_CONN_TERM);
-            else {status_length=0;browser=e->connect.conn_handle;int rc=ble_gap_security_initiate(browser);ESP_LOGI("wifi-setup","security request rc=%d",rc);}
+            else {status_length=drive_length=0;browser=e->connect.conn_handle;int rc=ble_gap_security_initiate(browser);ESP_LOGI("wifi-setup","security request rc=%d",rc);}
         }
         else if(snapshot().setup_active)advertise();
     } else if(e->type==BLE_GAP_EVENT_PASSKEY_ACTION&&e->passkey.params.action==BLE_SM_IOACT_DISP) {
@@ -216,7 +241,7 @@ static int wifi_gap(struct ble_gap_event *e,void *arg) {
     } else if(e->type==BLE_GAP_EVENT_DISCONNECT) {
         ESP_LOGI("wifi-setup","BLE disconnected reason=%d",e->disconnect.reason);
         if(e->disconnect.conn.conn_handle!=browser)return 0;
-        browser=BLE_HS_CONN_HANDLE_NONE;status_length=0;
+        browser=BLE_HS_CONN_HANDLE_NONE;status_length=drive_length=0;
         if(requested_open) {
             if(snapshot().setup_active) {setup_state(true,false,true);advertise();}
             else control(NULL);
@@ -257,5 +282,6 @@ void wifi_setup_init(void) {
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT,ESP_EVENT_ANY_ID,wifi_event,NULL));
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT,IP_EVENT_STA_GOT_IP,wifi_event,NULL));
     configASSERT(xTaskCreate(network_task,"wifi-config",4096,NULL,4,NULL)==pdPASS);
+    drive_setup_init();
     ESP_ERROR_CHECK(esp_wifi_start());
 }

@@ -90,3 +90,17 @@ python3 -m unittest discover -s tools -v
 Tests require a C compiler. The native AES harness uses macOS CommonCrypto;
 device firmware uses ESP-IDF mbedTLS. Build outputs, downloaded drivers, and local
 captures are excluded from version control.
+
+## Google Drive setup
+
+The [device setup page](https://e7h4n.github.io/coffee-watch/) also accepts your
+own Google OAuth client ID and client secret. They are sent to the watch over
+authenticated Bluetooth, not uploaded to the website. The watch performs Google's
+device authorization flow directly over HTTPS and keeps its refresh token locally.
+Use a **TVs and Limited Input devices** client with Google Drive API enabled and
+the `drive.file` scope. Follow the displayed Google authorization link/code.
+
+A successful setup creates the watch's **Coffee Watch** folder and writes/reads
+`connection-check.json` before confirming read/write access. This release sets up
+Drive access; automatic brew uploads are not enabled. See [Drive setup](spec/drive.md)
+for configuration, token lifetime, local removal and storage details.

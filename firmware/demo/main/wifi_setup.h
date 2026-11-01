@@ -14,7 +14,7 @@ typedef struct {
     bool setup_active,paired,saved;
     unsigned passkey;uint32_t request_id;
     int reason,setup_error;
-    char ssid[33],ip[16];
+    char ssid[33],ip[16],drive_state[24];
 } cw_network_view_t;
 void wifi_setup_init(void);
 void wifi_setup_register(void);

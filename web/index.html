@@ -3,26 +3,27 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Connect your Coffee Watch to Wi-Fi using Chrome and Web Bluetooth.">
+  <meta name="description" content="Configure Coffee Watch Wi-Fi and Google Drive using Chrome and Web Bluetooth.">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'none'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="theme-color" content="#141c18">
-  <title>Wi-Fi setup · Coffee Watch</title>
+  <title>Device setup · Coffee Watch</title>
   <link rel="icon" href="./favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="./style.css">
   <script type="module" src="./app.mjs"></script>
 </head>
 <body>
   <div class="shell">
-    <header class="topbar"><a class="brand" href="./" aria-label="Coffee Watch home"><img src="./favicon.svg" width="30" height="30" alt=""><span>Coffee Watch</span></a><span class="edition">NETWORK SETUP</span></header>
+    <header class="topbar"><a class="brand" href="./" aria-label="Coffee Watch home"><img src="./favicon.svg" width="30" height="30" alt=""><span>Coffee Watch</span></a><span class="edition">DEVICE SETUP</span></header>
     <main>
       <section class="intro" aria-labelledby="title">
         <div class="eyebrow"><span class="dot"></span> A LITTLE MORE CONNECTED</div>
         <h1 id="title">Bring your<br>watch <em>online.</em></h1>
-        <p class="lead">Your brewing companion, now on your network. Set up Wi-Fi directly from Chrome over Bluetooth.</p>
+        <p class="lead">Your brewing companion, now on your network. Set up Wi-Fi and Google Drive directly from Chrome over Bluetooth.</p>
         <ol class="steps">
           <li><span class="step-no">01</span><div><h2>Open setup on your watch</h2><p>On the idle screen, press <strong>Wi-Fi setup</strong>. Keep that screen open.</p></div></li>
           <li><span class="step-no">02</span><div><h2>Connect over Bluetooth</h2><p>Choose your Coffee Watch. If your computer asks for a pairing code, enter the six digits shown on the watch.</p></div></li>
           <li><span class="step-no">03</span><div><h2>Send your network details</h2><p>Use a 2.4 GHz network. The watch confirms when it has an IP address, then remembers the network.</p></div></li>
+          <li><span class="step-no">04</span><div><h2>Link your Google Drive</h2><p>Enter your own device OAuth client credentials, then approve the watch on Google. The watch verifies a file write and read in its Coffee Watch folder.</p></div></li>
         </ol>
       </section>
       <section class="setup-card" aria-labelledby="setup-title">
@@ -44,9 +45,33 @@
         </form>
         <div id="network-status" class="network-status" role="status" aria-live="polite"><span class="status-dot"></span><div><strong id="status-title">Waiting for your watch</strong><p id="status-detail">Network details stay on your device.</p></div></div>
         <button id="forget" class="text-button" type="button" hidden>Forget saved network</button>
+        <div class="separator"></div>
+        <form id="drive-form" autocomplete="off">
+          <fieldset id="drive-fields" disabled>
+            <legend>GOOGLE DRIVE</legend>
+            <p class="hint">Use your own Google Cloud OAuth client of type “TVs and Limited Input devices”, with Google Drive API enabled and the drive.file scope.</p>
+            <label for="client-id">Client ID</label>
+            <input id="client-id" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="128" placeholder="Your OAuth client ID" required>
+            <label for="client-secret">Client secret</label>
+            <input id="client-secret" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="96" placeholder="Sent only to your watch" required>
+            <p class="hint">Credentials travel over authenticated Bluetooth. The watch contacts Google directly. This page does not upload or store them.</p>
+            <button class="primary join" type="submit">Connect Google Drive <span aria-hidden="true">→</span></button>
+          </fieldset>
+        </form>
+        <p id="drive-error" class="error" role="alert" hidden></p>
+        <div id="drive-result" class="network-status" role="status" aria-live="polite"><span class="status-dot"></span><div><strong id="drive-title">Drive not connected</strong><p id="drive-detail">Connect Wi-Fi first, then authorize your watch.</p></div></div>
+        <div id="drive-authorization" hidden>
+          <p class="hint">Enter this code on Google’s authorization page:</p>
+          <p id="drive-code" class="authorization-code"></p>
+          <a id="drive-authorize" class="primary authorization-link" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer">Open Google authorization ↗</a>
+        </div>
+        <a id="drive-folder" class="text-button" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer" hidden>Open Coffee Watch folder ↗</a>
+        <button id="drive-verify" class="text-button" type="button" disabled>Check Drive read/write</button>
+        <button id="drive-forget" class="text-button" type="button" disabled>Remove Drive from watch / cancel</button>
+        <p class="hint">Check creates or updates connection-check.json in the watch’s Coffee Watch folder and reads it back. Removing Drive erases local credentials; revoke Google access separately in your Google Account. Testing-mode authorizations expire after seven days.</p>
       </section>
     </main>
-    <footer><p>Your password goes directly to the watch over authenticated Bluetooth.<br>It is never uploaded to GitHub or saved by this page.</p><a href="https://github.com/e7h4n/coffee-watch">Open-source brewing companion <span aria-hidden="true">↗</span></a></footer>
+    <footer><p>Your credentials go directly to the watch over authenticated Bluetooth.<br>They are never uploaded to GitHub or saved by this page.</p><a href="https://github.com/e7h4n/coffee-watch">Open-source brewing companion <span aria-hidden="true">↗</span></a></footer>
   </div>
 </body>
 </html>

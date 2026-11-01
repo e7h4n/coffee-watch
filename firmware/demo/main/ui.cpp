@@ -153,6 +153,16 @@ void ui_draw(const cw_flow_t &s,const UiState &u) {
         const char *states[]={"Not configured","Connecting","Connected","Connection failed","Disconnected"};
         text(states[u.network.state],234,296,26,u.network.state==CW_NET_CONNECTED?ACCENT:MUTED);
         if(u.network.state==CW_NET_CONNECTED)text(u.network.ip,234,326,20,MUTED);
+        if(u.network.drive_state[0]) {
+            const char *drive="Drive not configured";
+            if(!strcmp(u.network.drive_state,"saved"))drive="Drive authorization saved";
+            else if(!strcmp(u.network.drive_state,"requesting_code"))drive="Drive: requesting code";
+            else if(!strcmp(u.network.drive_state,"awaiting_consent"))drive="Drive: approve in browser";
+            else if(!strcmp(u.network.drive_state,"verifying"))drive="Drive: checking read/write";
+            else if(!strcmp(u.network.drive_state,"connected"))drive="Drive read/write verified";
+            else if(!strcmp(u.network.drive_state,"failed"))drive="Drive: check browser";
+            text(drive,234,354,18,MUTED);
+        }
         bottom("Close",true,u.held==1);return;
     }
     if(s.interrupted) {
