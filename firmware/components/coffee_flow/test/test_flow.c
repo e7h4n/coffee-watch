@@ -3,6 +3,7 @@
 #include <math.h>
 #include <stdio.h>
 static int64_t us;
+static unsigned brewer=CW_V60;
 static void weight(cw_flow_t *f,int32_t value,unsigned epoch) {
     bookoo_message_t m={.kind=BOOKOO_WEIGHT,.weight_cg=value};us+=100000;cw_scale_message(f,epoch,&m,us);
 }
@@ -20,7 +21,7 @@ static void initialize(cw_flow_t *f) {
     assert(cw_initial_request(f,p)&&p[2]==1);cw_write_done(f,true);
     assert(!f->initial_step&&!f->write_pending&&!cw_initial_request(f,p));
 }
-static void setup(cw_flow_t *f) {cw_init(f);cw_scale_link(f,true,7);assert(f->stage==CW_BREWER);cw_choose(f,0);assert(f->stage==CW_EMPTY);initialize(f);}
+static void setup(cw_flow_t *f) {cw_init(f);cw_scale_link(f,true,7);assert(f->stage==CW_BREWER);cw_choose(f,brewer);assert(f->stage==CW_EMPTY);initialize(f);}
 static void prepare(cw_flow_t *f) {
     setup(f);weights(f,10000,51);assert(f->stage==CW_PREP&&f->empty_cg==10000);
     bookoo_message_t m={.kind=BOOKOO_DOSE,.dose_cg=1500};cw_scale_message(f,7,&m,us+1);assert(f->scale.dose_valid);
@@ -113,5 +114,13 @@ int main(void) {
     cw_home(&f);cw_choose(&f,0);assert(cw_initial_request(&f,p));
     cw_write_done(&f,false);assert(f.interrupted&&!cw_initial_request(&f,p));
     weights(&f,20000,60);assert(f.stage==CW_EMPTY&&!f.empty_valid);
-    puts("10 full-flow scenarios passed");
+    // Switch steeps valve-closed and drains completely: extraction counts all
+    // added water (immersion), while retention still uses the beverage mass.
+    brewer=CW_SWITCH;stop(&f);assert(f.brewer==CW_SWITCH);
+    weights(&f,-37000,11);assert(f.stage==CW_TDS&&f.beverage_cg==27000&&f.scale.result.water_cg==30000);
+    cw_rs_link(&f,true);r.kind=RS_MEASUREMENT;cw_rs_message(&f,&r,us+1);assert(f.stage==CW_REPORT);
+    assert(fabsf(f.extraction-1.4f/98.6f*20*100)<.001f&&fabsf(f.retention-2.f)<.0001f&&fabsf(f.ratio-20.f)<.0001f);
+    assert(cw_brewer_immersion(CW_SWITCH)&&!cw_brewer_immersion(CW_V60)&&!cw_brewer_immersion(CW_AEROPRESS)&&!cw_brewer_immersion(CW_HOOP));
+    brewer=CW_V60;
+    puts("11 full-flow scenarios passed");
 }

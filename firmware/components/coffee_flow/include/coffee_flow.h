@@ -3,6 +3,8 @@
 #include "bookoo.h"
 #include "difluid_rs.h"
 typedef enum {CW_HOME,CW_BREWER,CW_EMPTY,CW_PREP,CW_BREW,CW_BEVERAGE,CW_TDS,CW_REPORT,CW_CHART,CW_READY} cw_stage_t;
+// Carousel order; record and UI names use the same indices.
+typedef enum {CW_V60,CW_SWITCH,CW_AEROPRESS,CW_HOOP} cw_brewer_t;
 typedef struct {bool active;int32_t min,max;int64_t first,last;float progress;} cw_stable_t;
 typedef struct {
     cw_stage_t stage;
@@ -18,6 +20,10 @@ typedef struct {
 } cw_flow_t;
 // Centigrams rounded half away from zero to the product precision, 0.1g.
 int32_t cw_mass_cg(int32_t value);
+// Switch is brewed valve-closed, then drained completely: the grounds hold brew
+// at cup strength, so extraction counts all added water (immersion formula).
+// Other brewers use the measured beverage mass.
+bool cw_brewer_immersion(unsigned brewer);
 void cw_init(cw_flow_t *s);
 void cw_home(cw_flow_t *s);
 void cw_scale_link(cw_flow_t *s,bool connected,unsigned epoch);

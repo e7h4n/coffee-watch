@@ -16,4 +16,4 @@ class FlowNativeTests(unittest.TestCase):
                             str(root / 'bookoo/bookoo.c'), str(root / 'coffee_flow/test/test_flow.c'),
                             '-lm', '-o', executable], check=True, capture_output=True, text=True, timeout=60)
             result = subprocess.run([executable], check=True, capture_output=True, text=True, timeout=10)
-            self.assertIn('10 full-flow scenarios passed', result.stdout)
+            self.assertIn('11 full-flow scenarios passed', result.stdout)

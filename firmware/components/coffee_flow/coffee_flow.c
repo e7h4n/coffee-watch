@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 int32_t cw_mass_cg(int32_t v) {return (int32_t)((v>=0?((int64_t)v+5)/10:-((-(int64_t)v+5)/10))*10);}
+bool cw_brewer_immersion(unsigned brewer) {return brewer==CW_SWITCH;}
 static void clear_stable(cw_flow_t *s) {memset(&s->stable,0,sizeof s->stable);}
 static void change(cw_flow_t *s,cw_stage_t stage) {s->stage=stage;clear_stable(s);s->generation++;s->error[0]=0;}
 void cw_init(cw_flow_t *s) {memset(s,0,sizeof *s);bookoo_session_init(&s->scale);s->stage=CW_HOME;}
@@ -103,7 +104,9 @@ void cw_rs_message(cw_flow_t *s,const rs_event_t *e,int64_t us) {
     if(e->kind!=RS_MEASUREMENT||!isfinite(e->tds_percent)||e->tds_percent<0||e->tds_percent>=100)return;
     if(!s->scale.result.dose_valid||s->scale.result.dose_cg<=0)return;
     s->tds=e->tds_percent;s->temperature=e->temperature_c;s->refraction=e->refraction;
-    s->extraction=s->tds*s->beverage_cg/s->scale.result.dose_cg;
+    s->extraction=cw_brewer_immersion(s->brewer)
+        ?s->tds/(100-s->tds)*s->scale.result.water_cg/s->scale.result.dose_cg*100
+        :s->tds*s->beverage_cg/s->scale.result.dose_cg;
     s->retention=(float)(s->scale.result.water_cg-s->beverage_cg)/s->scale.result.dose_cg;
     s->tds_valid=true;change(s,CW_REPORT);
 }
