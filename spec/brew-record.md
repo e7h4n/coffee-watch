@@ -55,16 +55,25 @@ alternate storage/upload path. Brew measurements remain available in the local
 workflow when an upload fails. A reboot resets that workflow; already-created
 Drive drafts remain in Drive even if TDS was never measured.
 
-## Schema v1
+## Schema v2
 
 Mass/volume fields use the product's 0.1g/ml rounding before calculations.
 The ratio has one decimal place, retention and extraction have two, TDS has two,
 sample temperature has one and refractive index has five. `elapsed_ms` preserves
 the scale's frozen brew duration. TDS and extraction match the existing report.
 
+`extraction_formula` names how `extraction_percent` was calculated and is present
+in drafts as well: `"immersion"` for Switch (valve-closed steep, then full drain)
+and AeroPress (inverted or outlet-closed steep, one full press, no bypass
+dilution), calculated as TDS / (100 − TDS) × added water / dry dose × 100; and
+`"beverage"` for V60 and Hoop (TDS × beverage mass / dry dose). The beverage-based value of
+any record can still be recomputed from `tds_percent`, `beverage_g` and `dose_g`.
+Schema v1 records have no `extraction_formula` and always used the beverage
+formula.
+
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "id": "020000000001-0123456789abcdef-00000001",
   "revision": 1,
   "created_at": "2026-11-02T08:00:00Z",
@@ -77,6 +86,7 @@ the scale's frozen brew duration. TDS and extraction match the existing report.
   "elapsed_ms": 180000,
   "brew_ratio": 15.0,
   "retention_g_per_g": 1.90,
+  "extraction_formula": "immersion",
   "tds_percent": null,
   "extraction_percent": null,
   "sample_temperature_c": null,

@@ -13,7 +13,8 @@ int main(void) {
     assert(cw_record_event(&t,CW_BEVERAGE,&f,200,&draft));assert(!draft.complete&&draft.revision==1&&draft.beverage_cg==19650);
     assert(!cw_record_event(&t,CW_TDS,&f,300,&again));
     char json[1536];assert(cw_record_json(&draft,"2026-11-02T08:00:00Z",json,sizeof json)>0);
-    assert(strstr(json,"\"beverage_g\":196.5"));assert(strstr(json,"\"dose_g\":15.0"));assert(strstr(json,"\"tds_percent\":null"));assert(strstr(json,"\"status\":\"awaiting_tds\""));puts(json);
+    assert(strstr(json,"\"beverage_g\":196.5"));assert(strstr(json,"\"dose_g\":15.0"));assert(strstr(json,"\"tds_percent\":null"));assert(strstr(json,"\"status\":\"awaiting_tds\""));
+    assert(strstr(json,"\"schema_version\":2"));assert(strstr(json,"\"extraction_formula\":\"immersion\""));puts(json);
     f.stage=CW_REPORT;f.tds_valid=true;f.tds=.9;f.temperature=22.8;f.refraction=1.333;f.extraction=11.79;
     assert(cw_record_event(&t,CW_TDS,&f,400,&final));assert(final.complete&&final.revision==2&&!strcmp(final.id,draft.id)&&final.captured_us==draft.captured_us);
     assert(!cw_record_event(&t,CW_REPORT,&f,500,&again));
@@ -27,6 +28,10 @@ int main(void) {
     final.tds=0;final.extraction=0;assert(cw_record_json(&final,"2026-11-02T08:00:00Z",json,sizeof json)>0);assert(strstr(json,"\"tds_percent\":0.00"));
     final.tds=NAN;assert(cw_record_json(&final,"2026-11-02T08:00:00Z",json,sizeof json)<0);
     assert(cw_record_json(&draft,"not UTC",json,sizeof json)<0);assert(cw_record_json(&draft,"2026-11-02T08:00:00Z",json,8)<0);
+    for(unsigned b=CW_V60;b<=CW_HOOP;b++) {
+        draft.brewer=b;assert(cw_record_json(&draft,"2026-11-02T08:00:00Z",json,sizeof json)>0);
+        assert(strstr(json,b==CW_SWITCH||b==CW_AEROPRESS?"\"extraction_formula\":\"immersion\"":"\"extraction_formula\":\"beverage\""));
+    }
     draft.dose_cg=1;assert(cw_record_json(&draft,"2026-11-02T08:00:00Z",json,sizeof json)<0);
     return 0;
 }

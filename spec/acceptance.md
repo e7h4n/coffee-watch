@@ -14,6 +14,8 @@
 - [ ] Weight/ml and calculation inputs have one decimal, correctly rounded.
 - [ ] Only a fresh normal RS result after Waiting TDS produces the report.
 - [ ] Numerical report and chart use identical calculated values.
+- [ ] Switch and AeroPress report immersion extraction from added water; V60 and
+      Hoop report beverage-based extraction.
 - [ ] Back/long Home work; key chords consume short presses.
 - [ ] Reconnect never resumes an interrupted brew automatically.
 

@@ -34,7 +34,8 @@ int cw_record_json(const cw_brew_record_t *r,const char *created,char *out,size_
         if(!isfinite(r->tds)||r->tds<0||r->tds>=100||!isfinite(r->temperature)||!isfinite(r->refraction)||!isfinite(r->extraction))return -1;
         snprintf(measured,sizeof measured,"\"tds_percent\":%.2f,\"extraction_percent\":%.2f,\"sample_temperature_c\":%.1f,\"refractive_index\":%.5f",(double)r->tds,(double)r->extraction,(double)r->temperature,(double)r->refraction);
     } else snprintf(measured,sizeof measured,"\"tds_percent\":null,\"extraction_percent\":null,\"sample_temperature_c\":null,\"refractive_index\":null");
-    int n=snprintf(out,cap,"{\"schema_version\":1,\"id\":\"%s\",\"revision\":%u,\"created_at\":\"%s\",\"status\":\"%s\",\"brewer\":\"%s\",\"dose_g\":%.1f,\"water_ml\":%.1f,\"beverage_g\":%.1f,\"empty_server_g\":%.1f,\"elapsed_ms\":%lu,\"brew_ratio\":%.1f,\"retention_g_per_g\":%.2f,%s}\n",
-        r->id,r->revision,created,r->complete?"complete":"awaiting_tds",brewers[r->brewer],cw_mass_cg(r->dose_cg)/100.,cw_mass_cg(r->water_cg)/100.,cw_mass_cg(r->beverage_cg)/100.,cw_mass_cg(r->empty_cg)/100.,(unsigned long)r->elapsed_ms,(double)cw_mass_cg(r->water_cg)/cw_mass_cg(r->dose_cg),(double)(cw_mass_cg(r->water_cg)-cw_mass_cg(r->beverage_cg))/cw_mass_cg(r->dose_cg),measured);
+    int n=snprintf(out,cap,"{\"schema_version\":2,\"id\":\"%s\",\"revision\":%u,\"created_at\":\"%s\",\"status\":\"%s\",\"brewer\":\"%s\",\"dose_g\":%.1f,\"water_ml\":%.1f,\"beverage_g\":%.1f,\"empty_server_g\":%.1f,\"elapsed_ms\":%lu,\"brew_ratio\":%.1f,\"retention_g_per_g\":%.2f,\"extraction_formula\":\"%s\",%s}\n",
+        r->id,r->revision,created,r->complete?"complete":"awaiting_tds",brewers[r->brewer],cw_mass_cg(r->dose_cg)/100.,cw_mass_cg(r->water_cg)/100.,cw_mass_cg(r->beverage_cg)/100.,cw_mass_cg(r->empty_cg)/100.,(unsigned long)r->elapsed_ms,(double)cw_mass_cg(r->water_cg)/cw_mass_cg(r->dose_cg),(double)(cw_mass_cg(r->water_cg)-cw_mass_cg(r->beverage_cg))/cw_mass_cg(r->dose_cg),
+        cw_brewer_immersion(r->brewer)?"immersion":"beverage",measured);
     return n>=0&&(size_t)n<cap?n:-1;
 }

@@ -58,7 +58,10 @@ Start serial capture before connecting BLE; closing USB can reset StopWatch.
    normal RS measurement. Exact level-1, CRC-valid single-result events produce
    the report; calibration/other routes, errors and earlier results do not.
 10. Swipe numerical report <-> chart. Both use the same measured result and
-    beverage-based extraction `TDS_percent * beverage_mass / dry_dose`.
+    extraction: beverage-based `TDS_percent * beverage_mass / dry_dose` for
+    V60/Hoop, immersion
+    `TDS_percent / (100 - TDS_percent) * added_water / dry_dose * 100` for
+    Switch/AeroPress.
 
 No automatic tare is assumed at connection. Reset dispatch does not advance a
 page or create a synthetic confirmation. Independent weight notifications drive

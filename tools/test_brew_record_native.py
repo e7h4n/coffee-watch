@@ -23,5 +23,8 @@ class BrewRecordTests(unittest.TestCase):
             self.assertIsNone(draft['tds_percent'])
             self.assertEqual(final['tds_percent'], 0.9)
             self.assertEqual(final['brewer'], 'Switch')
+            self.assertEqual(final['schema_version'], 2)
+            self.assertEqual(draft['extraction_formula'], 'immersion')
+            self.assertEqual(final['extraction_formula'], 'immersion')
             self.assertEqual(final['elapsed_ms'], 180000)
             self.assertEqual(final['beverage_g'], 196.5)

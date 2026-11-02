@@ -24,11 +24,21 @@ together to calculate and present your brew data with minimal manual recording.
    brew ratio, TDS, extraction yield, water retention per gram of coffee, and a
    Golden Cup chart.
 
-Mass and volume use one decimal place. Extraction yield uses measured beverage
+Mass and volume use one decimal place. V60 and Hoop use the measured beverage
 mass:
 
 ```text
 Extraction yield (%) = TDS (%) × beverage mass (g) / dry coffee dose (g)
+```
+
+Hario Switch is brewed with the valve closed for the steep, then opened until it
+drains completely. AeroPress is steeped inverted or with the outlet closed, then
+pressed out in one go, without bypass dilution. In both cases the spent grounds
+hold brew at cup strength, so extraction counts all added water (full-immersion
+mass balance, Liang, Chan & Ristenpart, *Sci. Rep.* 11:6904, 2021):
+
+```text
+Extraction yield (%) = TDS (%) / (100 − TDS (%)) × added water (g) / dry coffee dose (g) × 100
 ```
 
 On any screen, the StopWatch powers off after 10 minutes without interaction or
