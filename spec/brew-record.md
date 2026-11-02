@@ -63,9 +63,10 @@ sample temperature has one and refractive index has five. `elapsed_ms` preserves
 the scale's frozen brew duration. TDS and extraction match the existing report.
 
 `extraction_formula` names how `extraction_percent` was calculated and is present
-in drafts as well: `"immersion"` for Switch (valve-closed steep, then full drain;
-TDS / (100 − TDS) × added water / dry dose × 100) and `"beverage"` for V60,
-AeroPress and Hoop (TDS × beverage mass / dry dose). The beverage-based value of
+in drafts as well: `"immersion"` for Switch (valve-closed steep, then full drain)
+and AeroPress (inverted or outlet-closed steep, one full press, no bypass
+dilution), calculated as TDS / (100 − TDS) × added water / dry dose × 100; and
+`"beverage"` for V60 and Hoop (TDS × beverage mass / dry dose). The beverage-based value of
 any record can still be recomputed from `tds_percent`, `beverage_g` and `dose_g`.
 Schema v1 records have no `extraction_formula` and always used the beverage
 formula.

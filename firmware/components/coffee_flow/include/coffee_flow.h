@@ -20,9 +20,10 @@ typedef struct {
 } cw_flow_t;
 // Centigrams rounded half away from zero to the product precision, 0.1g.
 int32_t cw_mass_cg(int32_t value);
-// Switch is brewed valve-closed, then drained completely: the grounds hold brew
-// at cup strength, so extraction counts all added water (immersion formula).
-// Other brewers use the measured beverage mass.
+// Switch (valve-closed steep, then a full drain) and AeroPress (inverted or
+// outlet-closed steep, one full press, no bypass dilution) leave brew at cup
+// strength in the grounds, so extraction counts all added water (immersion
+// formula). V60 and Hoop use the measured beverage mass.
 bool cw_brewer_immersion(unsigned brewer);
 void cw_init(cw_flow_t *s);
 void cw_home(cw_flow_t *s);

@@ -30,10 +30,12 @@ half away from zero. The wire decoder retains centigrams. TDS retains sensor
 precision and is displayed to two decimals. Water ml uses the scale's gram value.
 
 - Brew ratio = added water / dry dose.
-- Extraction percent, V60/AeroPress/Hoop = TDS percent × beverage mass / dry dose.
-- Extraction percent, Switch = TDS percent / (100 - TDS percent) × added water /
-  dry dose × 100. Switch is defined as a valve-closed steep followed by a full
-  drain; retained brew in the grounds is at cup strength and counts as extracted.
+- Extraction percent, V60/Hoop = TDS percent × beverage mass / dry dose.
+- Extraction percent, Switch/AeroPress = TDS percent / (100 - TDS percent) ×
+  added water / dry dose × 100. Switch is defined as a valve-closed steep
+  followed by a full drain; AeroPress as an inverted or outlet-closed steep
+  followed by one full press, without bypass dilution. Retained brew in the
+  grounds is at cup strength and counts as extracted.
 - Retention g/g = (added water - beverage mass) / dry dose.
 
 No assumed retention, default dose, manual TDS or offline measurement path.

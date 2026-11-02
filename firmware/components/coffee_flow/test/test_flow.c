@@ -114,13 +114,15 @@ int main(void) {
     cw_home(&f);cw_choose(&f,0);assert(cw_initial_request(&f,p));
     cw_write_done(&f,false);assert(f.interrupted&&!cw_initial_request(&f,p));
     weights(&f,20000,60);assert(f.stage==CW_EMPTY&&!f.empty_valid);
-    // Switch steeps valve-closed and drains completely: extraction counts all
-    // added water (immersion), while retention still uses the beverage mass.
-    brewer=CW_SWITCH;stop(&f);assert(f.brewer==CW_SWITCH);
-    weights(&f,-37000,11);assert(f.stage==CW_TDS&&f.beverage_cg==27000&&f.scale.result.water_cg==30000);
-    cw_rs_link(&f,true);r.kind=RS_MEASUREMENT;cw_rs_message(&f,&r,us+1);assert(f.stage==CW_REPORT);
-    assert(fabsf(f.extraction-1.4f/98.6f*20*100)<.001f&&fabsf(f.retention-2.f)<.0001f&&fabsf(f.ratio-20.f)<.0001f);
-    assert(cw_brewer_immersion(CW_SWITCH)&&!cw_brewer_immersion(CW_V60)&&!cw_brewer_immersion(CW_AEROPRESS)&&!cw_brewer_immersion(CW_HOOP));
+    // Switch and AeroPress steep, then drain or press out completely: extraction
+    // counts all added water (immersion), while retention still uses the beverage.
+    for(unsigned i=0;i<2;i++) {
+        brewer=i?CW_AEROPRESS:CW_SWITCH;stop(&f);assert(f.brewer==brewer);
+        weights(&f,-37000,11);assert(f.stage==CW_TDS&&f.beverage_cg==27000&&f.scale.result.water_cg==30000);
+        cw_rs_link(&f,true);r.kind=RS_MEASUREMENT;cw_rs_message(&f,&r,us+1);assert(f.stage==CW_REPORT);
+        assert(fabsf(f.extraction-1.4f/98.6f*20*100)<.001f&&fabsf(f.retention-2.f)<.0001f&&fabsf(f.ratio-20.f)<.0001f);
+    }
+    assert(cw_brewer_immersion(CW_SWITCH)&&cw_brewer_immersion(CW_AEROPRESS)&&!cw_brewer_immersion(CW_V60)&&!cw_brewer_immersion(CW_HOOP));
     brewer=CW_V60;
-    puts("11 full-flow scenarios passed");
+    puts("12 full-flow scenarios passed");
 }

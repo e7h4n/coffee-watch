@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 int32_t cw_mass_cg(int32_t v) {return (int32_t)((v>=0?((int64_t)v+5)/10:-((-(int64_t)v+5)/10))*10);}
-bool cw_brewer_immersion(unsigned brewer) {return brewer==CW_SWITCH;}
+bool cw_brewer_immersion(unsigned brewer) {return brewer==CW_SWITCH||brewer==CW_AEROPRESS;}
 static void clear_stable(cw_flow_t *s) {memset(&s->stable,0,sizeof s->stable);}
 static void change(cw_flow_t *s,cw_stage_t stage) {s->stage=stage;clear_stable(s);s->generation++;s->error[0]=0;}
 void cw_init(cw_flow_t *s) {memset(s,0,sizeof *s);bookoo_session_init(&s->scale);s->stage=CW_HOME;}

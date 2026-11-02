@@ -30,7 +30,7 @@ int main(void) {
     assert(cw_record_json(&draft,"not UTC",json,sizeof json)<0);assert(cw_record_json(&draft,"2026-11-02T08:00:00Z",json,8)<0);
     for(unsigned b=CW_V60;b<=CW_HOOP;b++) {
         draft.brewer=b;assert(cw_record_json(&draft,"2026-11-02T08:00:00Z",json,sizeof json)>0);
-        assert(strstr(json,b==CW_SWITCH?"\"extraction_formula\":\"immersion\"":"\"extraction_formula\":\"beverage\""));
+        assert(strstr(json,b==CW_SWITCH||b==CW_AEROPRESS?"\"extraction_formula\":\"immersion\"":"\"extraction_formula\":\"beverage\""));
     }
     draft.dose_cg=1;assert(cw_record_json(&draft,"2026-11-02T08:00:00Z",json,sizeof json)<0);
     return 0;
