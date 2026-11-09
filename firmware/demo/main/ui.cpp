@@ -3,6 +3,7 @@
 #include "icons.h"
 #include "design.h"
 #include "smooth_fonts.h"
+#include "probe_trace.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -17,7 +18,7 @@ static int32_t previous_value=0;
 static bool have_value=false;
 static const char *names[]={"V60","Switch","AeroPress","Hoop"};
 static LGFX_Sprite *c;
-static void text(const char *s,int x,int y,int px,uint32_t color=FG,int max_width=0,bool ink_center=false) {
+static void text(const char *s,int x,int y,int px,uint32_t color=FG,int max_width=0,bool ink_center=false,lgfx::textdatum_t datum=middle_center) {
     struct FontSlot {lgfx::PointerWrapper data;lgfx::VLWfont font;bool loaded=false;};
     static FontSlot slots[sizeof(font_sizes)/sizeof(font_sizes[0])];
     int index=0;
@@ -27,7 +28,7 @@ static void text(const char *s,int x,int y,int px,uint32_t color=FG,int max_widt
         if(font_sizes[index]==60&&std::strcmp(s,"Ready"))--index;
         auto &slot=slots[index];
         if(!slot.loaded) {slot.data.set(font_data[index]);configASSERT(slot.font.loadFont(&slot.data));slot.loaded=true;}
-        c->setFont(&slot.font);c->setTextSize(1);c->setTextDatum(middle_center);
+        c->setFont(&slot.font);c->setTextSize(1);c->setTextDatum(datum);
         if(!max_width||c->textWidth(s)<=max_width||index==0)break;
         --index;
     }
@@ -88,7 +89,11 @@ bool ui_tick(const cw_flow_t &s,int64_t now) {
     value_flash=numeric?1-std::clamp((now-changed_us)/(float)design::motion::value_us,0.f,1.f):0;
     breath=.5f-.5f*std::cos((now%design::motion::breath_us)*6.2831853f/design::motion::breath_us);
     bool waiting=!s.interrupted&&s.stage==CW_READY;
-    return enter<1||value_flash>0||waiting;
+    // The brew chart follows the 10 Hz probe trace, independent of scale notifications.
+    static int64_t last_chart_us=0;
+    bool chart=!s.interrupted&&s.stage==CW_BREW&&now-last_chart_us>=100000;
+    if(chart)last_chart_us=now;
+    return enter<1||value_flash>0||waiting||chart;
 }
 static uint32_t number_color() {return mix(FG,ACCENT,(unsigned)(value_flash*90));}
 // Analytic one-pixel coverage keeps capsule ends smooth at native resolution.
@@ -120,7 +125,9 @@ bool ui_enabled(const cw_flow_t &s,int action,const UiState *u) {
     if(action==1) {
         if(s.stage==CW_BREWER)return true;
         if(s.stage==CW_EMPTY)return !s.initial_step&&!s.stable.active&&!s.write_pending;
-        if(s.stage==CW_BREW)return !s.write_pending&&!s.scale.pending;
+        // Brewing has no Stop action: the scale ends the brew (dripper removal or its own key).
+        // A brew revisited after Stop keeps a Continue action back to beverage weighing.
+        if(s.stage==CW_BREW)return s.scale.phase==BOOKOO_STOPPED&&s.scale.result_valid&&!s.write_pending&&!s.scale.pending;
     }
     if(s.stage==CW_PREP&&action==1&&!s.write_pending&&!s.scale.pending)
         return s.scale.phase==BOOKOO_IDLE&&s.scale.dose_valid&&s.empty_valid;
@@ -129,6 +136,54 @@ bool ui_enabled(const cw_flow_t &s,int action,const UiState *u) {
 int ui_hit(const cw_flow_t &s,int x,int y,const UiState *u) {
     if((x-234)*(x-234)+(y-233)*(y-233)>233*233)return 0;
     return y>=design::button_top&&ui_enabled(s,1,u)?1:0;
+}
+// Brew screen: live probe temperature and its curve since the pour, with the
+// added-water steps behind it. Fixed 60-100 C axis; time axis per cw_trace_span_ms.
+static void brew_chart() {
+    constexpr int X0=88,X1=392,Y0=142,Y1=306,COLUMNS=X1-X0;
+    constexpr float TMIN=60,TMAX=100;
+    static int16_t probe[COLUMNS];static int32_t weight[COLUMNS];
+    uint32_t elapsed=0,span=0;
+    size_t n=probe_trace_chart(COLUMNS,probe,weight,&elapsed,&span);
+    probe_reading_t now;probe_trace_reading(&now);
+    char b[24];
+    if(now.valid) {snprintf(b,sizeof b,"%.1f",(double)now.celsius);text(b,284,96,64,FG,0,false,middle_right);}
+    else text("--",284,96,64,MUTED,0,false,middle_right);
+    // The bundled fonts are ASCII only: draw the degree sign as a small ring.
+    c->fillSmoothCircle(292,101,4,MUTED);c->fillSmoothCircle(292,101,2,BG);
+    text("C",298,108,22,MUTED,0,false,middle_left);
+    auto y_of=[&](float celsius){return (int)std::lround(Y1-(Y1-Y0)*(std::clamp(celsius,TMIN,TMAX)-TMIN)/(TMAX-TMIN));};
+    for(int deg=70;deg<=100;deg+=10) {int y=y_of(deg);c->drawFastHLine(X0,y,X1-X0,LINE);fmt(X0-22,y,18,MUTED,"%d",deg);}
+    float now_x=X0+(float)(X1-X0)*elapsed/span;
+    for(uint32_t t=0;t<=span;t+=60000) {
+        int x=X0+(int)std::lround((float)(X1-X0)*t/span);
+        c->drawFastVLine(x,Y0,Y1-Y0,LINE);
+        if(!n||std::fabs(x-now_x)>26)fmt(x,Y1+16,18,MUTED,"%u:00",(unsigned)(t/60000));
+    }
+    int32_t scale_cg=30000;
+    for(size_t i=0;i<n;i++)if(weight[i]!=CW_TRACE_NO_WEIGHT&&weight[i]/100*115>scale_cg)scale_cg=weight[i]/100*115;
+    int last_top=-1,last_x=X0;int32_t last_weight=0;
+    for(size_t i=0;i<n;i++) {
+        if(weight[i]==CW_TRACE_NO_WEIGHT)continue;
+        int32_t w=std::max<int32_t>(0,weight[i]);int h=(int)((Y1-Y0)*.92f*w/scale_cg),x=X0+(int)i,top=Y1-h;
+        if(h>0)c->drawFastVLine(x,top,h,design::water_area);
+        if(last_top>=0)c->drawLine(x-1,last_top,x,top,design::water_edge);
+        last_top=top;last_x=x;last_weight=w;
+    }
+    if(last_weight>=100&&last_x-X0>70) {snprintf(b,sizeof b,"%ld ml",(long)((last_weight+50)/100));text(b,last_x-8,Y1-14,18,MUTED,0,false,middle_right);}
+    int px=0,py=0;bool have=false;float previous=0;
+    auto visit=[&](size_t i) {
+        if(probe[i]==CW_TRACE_NO_PROBE) {have=false;return;}
+        float celsius=probe[i]/100.f;int x=X0+(int)i,y=y_of(celsius);
+        // Below-axis readings (the dry bed before the pour) enter from the bottom edge.
+        if(have&&!(previous<TMIN&&celsius<TMIN))c->drawWideLine(px,py,x,y,1.5f,ACCENT);
+        px=x;py=y;have=true;previous=celsius;
+    };
+    // Two-pixel steps keep the antialiased line smooth; the newest column is always drawn.
+    for(size_t i=0;i<n;i+=2)visit(i);
+    if(n&&(n-1)%2)visit(n-1);
+    if(have&&previous>=TMIN) {c->fillSmoothCircle(px,py,8,BUTTON);c->fillSmoothCircle(px,py,5,ACCENT);}
+    if(n)fmt((int)now_x,Y1+16,18,ACCENT,"%u:%02u",(unsigned)(elapsed/60000),(unsigned)(elapsed/1000%60));
 }
 static void highlights(const cw_flow_t &s,int y) {
     text("TDS",150,y,design::type::label,MUTED);text("Extraction",318,y,design::type::label,MUTED);
@@ -209,10 +264,12 @@ void ui_draw(const cw_flow_t &s,const UiState &u) {
     case CW_READY:
         text("Ready",234,226,design::type::ready,mix(FG,ACCENT,150+(unsigned)(breath*105)));break;
     case CW_BREW: {
+        brew_chart();
         int32_t water=s.scale.phase==BOOKOO_STOPPED?s.scale.result.water_cg:s.live_cg;
-        text("Water",234,130,design::type::body,MUTED);fmt(213,206,design::type::hero,number_color(),"%.1f",water/100.0);text("ml",355,229,24,MUTED);
-        if(s.scale.running_dose_valid)fmt(234,292,40,FG,"1:%.1f",(double)water/s.scale.running_dose_cg);else text("1:--",234,292,40,MUTED);
-        bottom(s.scale.pending==BOOKOO_CMD_STOP?"Stopping...":"Stop",ui_enabled(s,1),u.held==1);break;
+        if(s.scale.phase==BOOKOO_STOPPED&&s.scale.result_valid)bottom("Continue",ui_enabled(s,1),u.held==1);
+        else if(s.scale.running_dose_valid)fmt(234,362,32,FG,"1:%.1f",(double)water/s.scale.running_dose_cg);
+        else text("1:--",234,362,32,MUTED);
+        break;
     }
     case CW_TDS:
         snprintf(b,sizeof b,"%.1fg",s.scale.result.dose_cg/100.0);field("Coffee dose",b,151,143,39);

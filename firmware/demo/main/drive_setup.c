@@ -14,6 +14,8 @@
 #include "esp_timer.h"
 #include "esp_log.h"
 #include "esp_mac.h"
+#include "esp_heap_caps.h"
+#include "esp_rom_md5.h"
 #include "nvs.h"
 #include "cJSON.h"
 #include "mbedtls/platform_util.h"
@@ -23,9 +25,9 @@
 // Private state belongs to one task. Public snapshots contain no credentials.
 typedef struct {char id[129],secret[97],refresh[2049],folder[65],file[65];} account_t;
 typedef struct {char state[24],error[40],code[16],url[81],folder[65];bool saved;uint32_t request;} public_t;
-typedef struct {cw_drive_command_t command;unsigned revision;bool brew;cw_brew_record_t record;} queued_command_t;
+typedef struct {cw_drive_command_t command;unsigned revision;bool brew;cw_brew_record_t record;cw_trace_snapshot_t *trace;} queued_command_t;
 static account_t account;
-static struct {char id[64],file[65],created[21];unsigned authorization_revision;} record_file;
+static struct {char id[64],file[65],created[21],trace_file[65];unsigned authorization_revision,trace_samples;bool trace_truncated;} record_file;
 static public_t view;
 static portMUX_TYPE lock=portMUX_INITIALIZER_UNLOCKED;
 static QueueHandle_t commands;
@@ -188,7 +190,39 @@ static void record_status(const cw_brew_record_t *r,cw_record_sync_t state,const
     snprintf(status.id,sizeof status.id,"%s",r->id);snprintf(status.file,sizeof status.file,"%s",file?file:"");snprintf(status.error,sizeof status.error,"%s",error?error:"");
     ESP_LOGI("record","id=%s revision=%u state=%u file=%s error=%s",status.id,status.revision,state,status.file,status.error);demo_record_status(&status);
 }
-static void upload_record(const cw_brew_record_t *r) {
+// Uploads the brew trace CSV once, before the first draft that references it.
+// Drive's md5Checksum of the stored media must equal the local CSV digest.
+static const char *upload_trace(cw_brew_record_t *r,const cw_trace_snapshot_t *trace,const char *created) {
+    char head[640];
+    int head_n=snprintf(head,sizeof head,"--coffee-trace\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n{\"name\":\"brew-%s-trace.csv\",\"mimeType\":\"text/csv\",\"parents\":[\"%s\"],\"appProperties\":{\"coffeeWatchTrace\":\"%s\",\"recordedAt\":\"%s\"}}\r\n--coffee-trace\r\nContent-Type: text/csv\r\n\r\n",r->id,account.folder,r->id,created);
+    static const char tail[]="\r\n--coffee-trace--\r\n";
+    if(head_n<0||(size_t)head_n>=sizeof head)return "trace_invalid";
+    size_t bound=cw_trace_csv_bound(trace->count);
+    char *body=heap_caps_malloc((size_t)head_n+bound+sizeof tail,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!body)return "trace_out_of_memory";
+    memcpy(body,head,(size_t)head_n);
+    int csv_n=cw_trace_csv(trace->samples,trace->count,trace->brew_ms,body+head_n,bound);
+    if(csv_n<0) {free(body);return "trace_invalid";}
+    memcpy(body+head_n+csv_n,tail,sizeof tail);
+    uint8_t digest[ESP_ROM_MD5_DIGEST_LEN];md5_context_t md5;
+    esp_rom_md5_init(&md5);esp_rom_md5_update(&md5,body+head_n,(uint32_t)csv_n);esp_rom_md5_final(digest,&md5);
+    char expected[2*ESP_ROM_MD5_DIGEST_LEN+1];
+    for(unsigned i=0;i<ESP_ROM_MD5_DIGEST_LEN;i++)sprintf(expected+2*i,"%02x",digest[i]);
+    int status=http("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,md5Checksum,size",HTTP_METHOD_POST,body,"multipart/related; boundary=coffee-trace",true);
+    free(body);
+    if(status!=200||!current())return "trace_create_failed";
+    cJSON *reply=cJSON_Parse(response);char id[65],md5_text[40],size_text[24];
+    bool ok=text_field(reply,"id",id,sizeof id)&&file_id(id)&&text_field(reply,"md5Checksum",md5_text,sizeof md5_text)&&text_field(reply,"size",size_text,sizeof size_text);
+    cJSON_Delete(reply);
+    if(!ok)return "trace_response_invalid";
+    if(strcmp(md5_text,expected)||strtol(size_text,NULL,10)!=csv_n)return "trace_readback_failed";
+    snprintf(r->trace_file,sizeof r->trace_file,"%s",id);r->trace_samples=(unsigned)trace->count;r->trace_truncated=trace->truncated;
+    snprintf(record_file.trace_file,sizeof record_file.trace_file,"%s",id);record_file.trace_samples=r->trace_samples;record_file.trace_truncated=r->trace_truncated;
+    ESP_LOGI("record","trace id=%s samples=%u bytes=%d md5=%s",id,r->trace_samples,csv_n,expected);
+    return NULL;
+}
+static void upload_record(const cw_brew_record_t *input,const cw_trace_snapshot_t *trace) {
+    cw_brew_record_t copy=*input,*r=&copy;r->trace_file[0]=0;r->trace_samples=0;r->trace_truncated=false;
     char file[65]="",created[21]="",url[640],json[1536];const char *error=NULL;
     record_status(r,CW_RECORD_SAVING,NULL,NULL);
     if(!load()) {error="authorize_first";goto finished;}
@@ -200,6 +234,7 @@ static void upload_record(const cw_brew_record_t *r) {
     if(exists) {
         if(record_file.authorization_revision!=active_revision) {error="authorization_changed";goto finished;}
         snprintf(file,sizeof file,"%s",record_file.file);snprintf(created,sizeof created,"%s",record_file.created);
+        if(record_file.trace_file[0]) {snprintf(r->trace_file,sizeof r->trace_file,"%s",record_file.trace_file);r->trace_samples=record_file.trace_samples;r->trace_truncated=record_file.trace_truncated;}
         snprintf(url,sizeof url,"https://www.googleapis.com/drive/v3/files/%s?fields=parents,trashed",file);
         if(http(url,HTTP_METHOD_GET,NULL,NULL,true)!=200||!current()) {error="record_lookup_failed";goto finished;}
         cJSON *metadata=cJSON_Parse(response),*parents=cJSON_GetObjectItemCaseSensitive(metadata,"parents"),*parent=cJSON_GetArrayItem(parents,0);
@@ -207,12 +242,13 @@ static void upload_record(const cw_brew_record_t *r) {
         cJSON_Delete(metadata);if(!valid) {error="record_metadata_invalid";goto finished;}
     } else {
         if(r->complete||r->revision!=1) {error="draft_not_found";goto finished;}
-        memset(&record_file,0,sizeof record_file);snprintf(record_file.id,sizeof record_file.id,"%s",r->id);record_file.authorization_revision=active_revision;
+        memset(&record_file,0,sizeof record_file);snprintf(record_file.id,sizeof record_file.id,"%.63s",r->id);record_file.authorization_revision=active_revision;
         // Convert the sensor-event monotonic timestamp after SNTP establishes UTC.
         struct timeval wall;gettimeofday(&wall,NULL);
         time_t captured=(time_t)(((int64_t)wall.tv_sec*1000000+wall.tv_usec-esp_timer_get_time()+r->captured_us)/1000000);
         struct tm utc;gmtime_r(&captured,&utc);strftime(created,sizeof created,"%Y-%m-%dT%H:%M:%SZ",&utc);
         snprintf(record_file.created,sizeof record_file.created,"%s",created);
+        if(trace&&trace->count&&(error=upload_trace(r,trace,created)))goto finished;
     }
     if(cw_record_json(r,created,json,sizeof json)<0) {error="record_invalid";goto finished;}
     if(exists) {
@@ -277,7 +313,8 @@ static void drive_task(void *arg) {
         if(xQueueReceive(commands,&item,wait)==pdTRUE) {
             if(item.brew) {
                 if(expires_us||item.revision!=atomic_load(&revision))record_status(&item.record,CW_RECORD_FAILED,NULL,"authorization_changed");
-                else {active_revision=item.revision;wipe_session();upload_record(&item.record);wipe_session();mbedtls_platform_zeroize(&account,sizeof account);}
+                else {active_revision=item.revision;wipe_session();upload_record(&item.record,item.trace);wipe_session();mbedtls_platform_zeroize(&account,sizeof account);}
+                free(item.trace);item.trace=NULL;
                 mbedtls_platform_zeroize(&item,sizeof item);if(!expires_us&&uxQueueMessagesWaiting(commands)==0)atomic_store(&occupied,false);continue;
             }
             active_revision=item.revision;wipe_session();
@@ -308,11 +345,11 @@ bool drive_setup_submit(const cw_drive_command_t *c) {
     if(!ok&&uxQueueMessagesWaiting(commands)==0)atomic_store(&occupied,false);
     return ok;
 }
-bool drive_setup_record(const cw_brew_record_t *record) {
-    if(!atomic_load(&have_credentials)) {record_status(record,CW_RECORD_FAILED,NULL,"authorize_first");return false;}
-    queued_command_t item={.revision=atomic_load(&revision),.brew=true,.record=*record};
+bool drive_setup_record(const cw_brew_record_t *record,cw_trace_snapshot_t *trace) {
+    if(!atomic_load(&have_credentials)) {free(trace);record_status(record,CW_RECORD_FAILED,NULL,"authorize_first");return false;}
+    queued_command_t item={.revision=atomic_load(&revision),.brew=true,.record=*record,.trace=trace};
     bool ok=xQueueSend(commands,&item,0)==pdTRUE;mbedtls_platform_zeroize(&item,sizeof item);
-    if(!ok)record_status(record,CW_RECORD_FAILED,NULL,"record_queue_full");
+    if(!ok) {free(trace);record_status(record,CW_RECORD_FAILED,NULL,"record_queue_full");}
     return ok;
 }
 int drive_setup_status(char *out,int capacity) {

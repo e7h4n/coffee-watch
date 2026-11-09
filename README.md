@@ -15,6 +15,8 @@ together to calculate and present your brew data with minimal manual recording.
    from the value you saved on the scale during bean preparation.
 3. **Start brewing.** Tap Start to arm Auto READY. Pouring starts the timer through
    the scale's own event, while the watch displays added water and brew ratio.
+   From Start until the brew stops, the watch records weight and bed-probe
+   temperature 10 times per second.
 4. **Capture beverage mass.** After removing the dripper triggers Stop, follow the
    prompt to lift the server. Beverage mass is calculated automatically without
    another manual tare.
@@ -52,6 +54,7 @@ this interval.
 | M5Stack StopWatch | Interaction, device connections, and reports | ESP32-S3 |
 | BOOKOO Themis Ultra | Coffee dose, weight, and brewing timer | Firmware 4.0.1, Ratio + Auto mode |
 | DiFluid RS | TDS measurement | Firmware v002-005 |
+| Bed probe | Brew temperature trace | 100 kΩ B3950 NTC on G8, G9 = 3V3/2 reference |
 
 This is a prototype with real brewing walkthroughs completed. The firmware
 connects to the two peers configured in its transport; a general device picker
@@ -112,7 +115,8 @@ the `drive.file` scope. Follow the displayed Google authorization link/code.
 
 A successful setup creates the watch's **Coffee Watch** folder and writes/reads
 `connection-check.json` before confirming read/write access. The watch creates a
-brew JSON record when beverage weight is confirmed, then updates the same file
+brew JSON record when beverage weight is confirmed, uploading the brew's 10 Hz
+weight/temperature trace as a CSV alongside it, then updates the same JSON file
 when a valid TDS measurement arrives. See [Brew records](spec/brew-record.md) and
 [Drive setup](spec/drive.md)
 for configuration, token lifetime, local removal and storage details.

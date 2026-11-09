@@ -6,6 +6,9 @@ typedef struct {
     char id[64];unsigned revision,brewer;int64_t captured_us;
     int32_t dose_cg,water_cg,beverage_cg,empty_cg;uint32_t elapsed_ms;
     bool complete;float tds,temperature,refraction,extraction;
+    // Probe trace CSV (see brew_trace.h). Set on the first revision; the Drive
+    // worker keeps the uploaded file ID and repeats it in later revisions.
+    unsigned trace_samples;bool trace_truncated;char trace_file[65];
 } cw_brew_record_t;
 typedef struct {char session[40];unsigned sequence;cw_brew_record_t record;} cw_record_tracker_t;
 void cw_record_init(cw_record_tracker_t *tracker,const char *session);

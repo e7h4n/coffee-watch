@@ -14,8 +14,12 @@ The complete brewing assembly sits on the scale while pouring.
    selection or resaving during preparation.
 4. The single Start button requests Auto Ready. Show Ready only after its exact
    device event. Pouring produces the real Start event and enters brewing.
-5. Show live added water, ratio and elapsed time. Stop from the watch or scale
-   freezes dose, water and time from device events. Dripper removal can Stop Auto.
+5. Show the live bed-probe temperature with its curve since the pour, the added
+   water as steps behind it, elapsed time on the curve and the ratio. There is no
+   Stop action on the watch while brewing: the scale ends the brew (dripper
+   removal in Auto, or the scale's own key), freezing dose, water and time from
+   device events. Back still requests Stop. A brew revisited after Stop shows
+   Continue back to beverage weighing.
 6. Show Remove server. BOOKOO Auto Done reports zero while the full server stays
    on the scale; removing it produces negative gross server mass. Beverage mass
    equals -live weight - saved empty-server mass. Require weight < -30.0g,

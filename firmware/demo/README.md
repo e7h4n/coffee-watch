@@ -24,6 +24,10 @@ PMIC address 6E and touch address 15 have been confirmed on the user's unit.
 Display wiring/panel init is adapted from the official StopWatch UserDemo.
 The panel framebuffer is 468x466; the physical viewing area is round.
 
+The bed probe uses the back header: G8 is the NTC node (3V3 → 10 kΩ → G8 →
+100 kΩ B3950 NTC → GND) and G9 is a 3V3/2 reference. Serial command `probe`
+prints the current temperature, the G8/G9 voltages and the trace state.
+
 The demo is paired to the two physical BLE addresses already verified in transport.c. It is not a general device-picker or configuration product.
 Start serial capture before connecting BLE; closing USB can reset StopWatch.
 

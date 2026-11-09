@@ -18,6 +18,10 @@
       Hoop report beverage-based extraction.
 - [ ] Back/long Home work; key chords consume short presses.
 - [ ] Reconnect never resumes an interrupted brew automatically.
+- [ ] Serial `probe` reads about 3.0 V on G8 at room temperature and a falling
+      G8 voltage with rising probe temperature; 90 °C water reads 88–92 °C.
+- [ ] Start → pour → Stop produces `brew-<id>-trace.csv` at 10 Hz, `t_ms` 0 at
+      the pour, and the record's `probe_trace` points to it.
 
 Automated checks run with `python3 -m unittest discover -s tools -v`.
 Physical checks are a checklist, not an assertion that every release passed them.
