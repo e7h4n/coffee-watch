@@ -13,6 +13,7 @@ class BrewRecordTests(unittest.TestCase):
             subprocess.run([os.environ.get('CC', 'cc'), '-std=c11', '-Wall', '-Wextra', '-Werror',
                             '-I', str(root / 'brew_record/include'), '-I', str(root / 'coffee_flow/include'),
                             '-I', str(root / 'bookoo/include'), '-I', str(root / 'difluid_rs/include'),
+                            '-I', str(root / 'brew_trace/include'),
                             str(root / 'brew_record/brew_record.c'), str(root / 'coffee_flow/coffee_flow.c'),
                             str(root / 'bookoo/bookoo.c'), str(root / 'brew_record/test/test_brew_record.c'),
                             '-lm', '-o', binary], check=True, capture_output=True, text=True, timeout=60)
@@ -23,8 +24,16 @@ class BrewRecordTests(unittest.TestCase):
             self.assertIsNone(draft['tds_percent'])
             self.assertEqual(final['tds_percent'], 0.9)
             self.assertEqual(final['brewer'], 'Switch')
-            self.assertEqual(final['schema_version'], 2)
+            self.assertEqual(final['schema_version'], 3)
             self.assertEqual(draft['extraction_formula'], 'immersion')
             self.assertEqual(final['extraction_formula'], 'immersion')
             self.assertEqual(final['elapsed_ms'], 180000)
             self.assertEqual(final['beverage_g'], 196.5)
+            for record in (draft, final):
+                trace = record['probe_trace']
+                self.assertEqual(trace['file_id'], '1AbC_d-9')
+                self.assertEqual(trace['name'], 'brew-' + record['id'] + '-trace.csv')
+                self.assertEqual(trace['sample_rate_hz'], 10)
+                self.assertEqual(trace['samples'], 1800)
+                self.assertFalse(trace['truncated'])
+                self.assertEqual(trace['columns'], ['t_ms', 'weight_g', 'probe_c'])

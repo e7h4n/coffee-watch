@@ -3,7 +3,8 @@
 A record is generated from two accepted sensor transitions:
 
 1. **Beverage → Waiting TDS**: the confirmed beverage weight creates a JSON
-   record in the watch's authorized **Coffee Watch** folder. Its status is
+   record in the watch's authorized **Coffee Watch** folder, preceded by the
+   brew's 10 Hz probe trace CSV (see [Probe trace](#probe-trace)). Its status is
    `awaiting_tds`; TDS, extraction, sample temperature and refractive index are
    explicitly `null`.
 2. **Waiting TDS → Report**: an accepted RS measurement updates the same Drive
@@ -55,7 +56,40 @@ alternate storage/upload path. Brew measurements remain available in the local
 workflow when an upload fails. A reboot resets that workflow; already-created
 Drive drafts remain in Drive even if TDS was never measured.
 
-## Schema v2
+## Probe trace
+
+From the moment Start is accepted (Ready) until the brew stops (Brew →
+Beverage), a 10 Hz task samples the latest scale weight and the bed-probe
+temperature. The probe is a 100 kΩ B3950 NTC on the StopWatch back header: 3V3
+→ 10 kΩ → G8 → NTC → GND, with G9 = 3V3/2 from two 10 kΩ resistors. Both are
+read through ADC1 (12 dB, eight interleaved samples each); the G8/G9 ratio
+cancels supply and reference drift. A saturated, open or shorted probe is a
+missing value, not a temperature. Readings below roughly 25 °C are near the ADC
+range limit and may be missing.
+
+The trace holds up to 20 minutes (12,000 samples); later samples are dropped and
+the trace is marked truncated. Returning from Ready to Preparation and starting
+again discards it. With the first draft of a brew, the Drive worker uploads it as
+`brew-<record-id>-trace.csv`:
+
+```text
+t_ms,weight_g,probe_c
+-1200,0.0,93.12
+-1100,0.0,93.10
+0,0.3,93.05
+100,1.8,92.98
+```
+
+`t_ms` is relative to the scale timer start (the Ready → Brew event), negative
+while waiting for the pour. Weight has one decimal like the rest of the product;
+temperature has two decimals. Missing values are empty fields. Upload is
+verified by comparing Drive's `md5Checksum` and `size` with the local CSV, then
+the record JSON references the file. A failed trace upload fails the draft; no
+record is created without the trace it describes. A record whose creation fails
+after the trace upload can leave that CSV in the folder. Later revisions repeat
+the same `probe_trace` object and do not upload the CSV again.
+
+## Schema v3
 
 Mass/volume fields use the product's 0.1g/ml rounding before calculations.
 The ratio has one decimal place, retention and extraction have two, TDS has two,
@@ -69,11 +103,12 @@ dilution), calculated as TDS / (100 − TDS) × added water / dry dose × 100; a
 `"beverage"` for V60 and Hoop (TDS × beverage mass / dry dose). The beverage-based value of
 any record can still be recomputed from `tds_percent`, `beverage_g` and `dose_g`.
 Schema v1 records have no `extraction_formula` and always used the beverage
-formula.
+formula. Schema v3 adds `probe_trace`; it is `null` only if no trace was
+recorded for the brew.
 
 ```json
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "id": "020000000001-0123456789abcdef-00000001",
   "revision": 1,
   "created_at": "2026-11-02T08:00:00Z",
@@ -90,7 +125,15 @@ formula.
   "tds_percent": null,
   "extraction_percent": null,
   "sample_temperature_c": null,
-  "refractive_index": null
+  "refractive_index": null,
+  "probe_trace": {
+    "name": "brew-020000000001-0123456789abcdef-00000001-trace.csv",
+    "file_id": "1AbCdEfGhIjKlMnOpQrStUvWxYz",
+    "sample_rate_hz": 10,
+    "samples": 2104,
+    "truncated": false,
+    "columns": ["t_ms", "weight_g", "probe_c"]
+  }
 }
 ```
 
