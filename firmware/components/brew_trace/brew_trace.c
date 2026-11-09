@@ -45,3 +45,26 @@ int cw_trace_csv(const cw_trace_sample_t *s,size_t count,uint32_t brew_ms,char *
     }
     return (int)used;
 }
+uint32_t cw_trace_span_ms(uint32_t elapsed_ms) {
+    if(elapsed_ms<=150000)return 150000;
+    if(elapsed_ms<=240000)return 240000;
+    return (elapsed_ms+119999)/120000*120000;
+}
+uint32_t cw_trace_elapsed_ms(const cw_trace_t *t) {
+    if(!t->brew_started||!t->count)return 0;
+    uint32_t last=t->samples[t->count-1].t_ms;
+    return last>t->brew_ms?last-t->brew_ms:0;
+}
+size_t cw_trace_series(const cw_trace_t *t,uint32_t span_ms,size_t columns,int16_t *probe_cc,int32_t *weight_cg) {
+    for(size_t i=0;i<columns;i++) {probe_cc[i]=CW_TRACE_NO_PROBE;weight_cg[i]=CW_TRACE_NO_WEIGHT;}
+    if(!t->brew_started||!columns||!span_ms)return 0;
+    size_t used=0;
+    for(size_t i=0;i<t->count;i++) {
+        const cw_trace_sample_t *s=&t->samples[i];
+        if(s->t_ms<t->brew_ms)continue;
+        uint64_t column=(uint64_t)(s->t_ms-t->brew_ms)*columns/span_ms;
+        if(column>=columns)break;
+        probe_cc[column]=s->probe_cc;weight_cg[column]=s->weight_cg;used=(size_t)column+1;
+    }
+    return used;
+}

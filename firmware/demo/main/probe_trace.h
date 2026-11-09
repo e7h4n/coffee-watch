@@ -19,6 +19,8 @@ void probe_trace_weight(bool valid,int32_t weight_cg);
 // The caller owns it and releases it with free().
 cw_trace_snapshot_t *probe_trace_snapshot(void);
 typedef struct {bool valid,active,brew_started,truncated;float celsius,ratio;int ntc_mv,ref_mv;unsigned count;} probe_reading_t;
+// Brew-screen chart columns (see cw_trace_series); also reports elapsed time and axis span.
+size_t probe_trace_chart(size_t columns,int16_t *probe_cc,int32_t *weight_cg,uint32_t *elapsed_ms,uint32_t *span_ms);
 void probe_trace_reading(probe_reading_t *out);
 #ifdef __cplusplus
 }

@@ -4,6 +4,8 @@
 namespace design {
 constexpr uint32_t background=0x141c18,foreground=0xe9eee8,muted=0x8d9e93;
 constexpr uint32_t accent=0xc9f27b,line=0x334038,button=0x26352a;
+// Brew chart: added-water steps behind the temperature curve.
+constexpr uint32_t water_area=0x223028,water_edge=0x55685c;
 constexpr int center_x=234,center_y=233,button_top=354;
 constexpr int button_height=466-button_top,button_center_y=button_top+button_height/2;
 namespace type {

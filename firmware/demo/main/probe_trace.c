@@ -102,3 +102,10 @@ cw_trace_snapshot_t *probe_trace_snapshot(void) {
     return s;
 }
 void probe_trace_reading(probe_reading_t *out) {xSemaphoreTake(lock,portMAX_DELAY);*out=latest;xSemaphoreGive(lock);}
+size_t probe_trace_chart(size_t columns,int16_t *probe_cc,int32_t *weight_cg,uint32_t *elapsed_ms,uint32_t *span_ms) {
+    xSemaphoreTake(lock,portMAX_DELAY);
+    uint32_t elapsed=cw_trace_elapsed_ms(&trace),span=cw_trace_span_ms(elapsed);
+    size_t n=cw_trace_series(&trace,span,columns,probe_cc,weight_cg);
+    xSemaphoreGive(lock);
+    *elapsed_ms=elapsed;*span_ms=span;return n;
+}

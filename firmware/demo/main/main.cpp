@@ -59,10 +59,8 @@ static void action(int which) {
     }
     if(which==1&&flow.stage==CW_EMPTY) {
         uint8_t b[6];if(cw_reset_dispatch(&flow,b)) {transport_write(b,flow.generation);ESP_LOGI("flow","Reset dispatched; no action-completed inference");}
-    } else if(which==1&&flow.stage==CW_BREW) {
-        bookoo_command_t cmd=BOOKOO_CMD_STOP;uint8_t b[6];
-        if(cw_timer_request(&flow,cmd,b))transport_write(b,flow.generation);
     }
+    // No Stop action while brewing: the scale ends the brew. Back still requests Stop.
 }
 static void back() {
     if(ui.wifi_setup) {wifi_setup_close();ui.wifi_setup=false;ui.held=0;render_needed=true;return;}

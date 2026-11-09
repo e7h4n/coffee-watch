@@ -28,6 +28,18 @@ int main(void) {
     assert((size_t)n<cw_trace_csv_bound(t.count));
     cw_trace_stop(&t);assert(!cw_trace_append(&t,1600000,0,0));
     cw_trace_start(&t,2000000);assert(t.count==0&&!t.truncated&&!t.brew_started);
+    assert(cw_trace_span_ms(0)==150000&&cw_trace_span_ms(150000)==150000&&cw_trace_span_ms(150001)==240000);
+    assert(cw_trace_span_ms(240001)==360000&&cw_trace_span_ms(361000)==480000);
+    cw_trace_sample_t many[40];cw_trace_init(&t,many,40);cw_trace_start(&t,0);
+    int16_t probe[10];int32_t weight[10];
+    assert(cw_trace_series(&t,1000,10,probe,weight)==0&&cw_trace_elapsed_ms(&t)==0);
+    for(int i=0;i<30;i++) {if(i==5)cw_trace_brew(&t,500000);cw_trace_append(&t,i*100000,i*100,(int16_t)(9000+i));}
+    // 25 samples after the 500 ms brew start; a 4 s span over 10 columns is 400 ms per column.
+    assert(cw_trace_elapsed_ms(&t)==2400);
+    size_t cols=cw_trace_series(&t,4000,10,probe,weight);
+    assert(cols==7&&probe[0]==9008&&weight[0]==800&&probe[6]==9029&&weight[6]==2900);
+    for(size_t i=cols;i<10;i++)assert(probe[i]==CW_TRACE_NO_PROBE&&weight[i]==CW_TRACE_NO_WEIGHT);
+    assert(cw_trace_series(&t,1000,10,probe,weight)==10&&probe[9]==9014);
     fputs(csv,stdout);puts("trace tests passed");
     return 0;
 }

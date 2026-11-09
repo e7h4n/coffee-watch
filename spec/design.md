@@ -49,6 +49,16 @@ business state or reset the 10-minute idle timer. No other device is queried.
   Its progress comes exclusively from the notification-driven business window.
 - Connection, initialization and TDS waits use their text status without spinners.
 - Ready: subtly breathing text color; no outline, fabricated progress or countdown.
+- Brew chart: probe temperature at 64px with a drawn degree ring (fonts are
+  ASCII), then a 304×164px chart at (88,142): fixed 60–100 °C axis with
+  70/80/90/100 grid, minute grid and labels, the current time in accent at the
+  newest sample, and a 3px antialiased accent curve ending in a dot. Added water
+  is drawn behind it as #223028 steps with a #55685c edge, scaled to max(300 ml,
+  1.15 × water) and labeled in ml. The axis spans 2:30, then 4:00, 6:00 and further
+  two-minute steps; the curve compresses rather than scrolls. Readings below 60 °C
+  enter from the bottom edge; missing readings break the line and show `--`.
+  The chart redraws at the 10 Hz trace rate, ratio sits below it, and there is no
+  bottom action while brewing.
 - Brewer carousel: cyclic positioning, scaling and easing with queued input.
 
 ## Motion

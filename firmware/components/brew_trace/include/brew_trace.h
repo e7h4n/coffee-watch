@@ -40,3 +40,12 @@ bool cw_trace_append(cw_trace_t *t,int64_t us,int32_t weight_cg,int16_t probe_cc
 // Missing values are empty fields. Returns the length, or -1 if it does not fit.
 int cw_trace_csv(const cw_trace_sample_t *samples,size_t count,uint32_t brew_ms,char *out,size_t capacity);
 size_t cw_trace_csv_bound(size_t count);
+// Brew-screen chart. The time axis shows 2:30, then 4:00, 6:00 and further
+// whole two-minute steps, so the curve compresses instead of scrolling.
+uint32_t cw_trace_span_ms(uint32_t elapsed_ms);
+// One value per chart column: the last sample in each equal bucket of [0,span)
+// after the brew start. Columns without a sample stay missing. Returns the
+// number of columns up to the newest sample (0 before the brew start).
+size_t cw_trace_series(const cw_trace_t *t,uint32_t span_ms,size_t columns,int16_t *probe_cc,int32_t *weight_cg);
+// Milliseconds from the brew start to the newest sample, or 0.
+uint32_t cw_trace_elapsed_ms(const cw_trace_t *t);
