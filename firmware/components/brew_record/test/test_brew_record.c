@@ -15,10 +15,10 @@ int main(void) {
     char json[1536];assert(cw_record_json(&draft,"2026-11-02T08:00:00Z",json,sizeof json)>0);
     assert(strstr(json,"\"beverage_g\":196.5"));assert(strstr(json,"\"dose_g\":15.0"));assert(strstr(json,"\"tds_percent\":null"));assert(strstr(json,"\"status\":\"awaiting_tds\""));
     assert(strstr(json,"\"schema_version\":3"));assert(strstr(json,"\"extraction_formula\":\"immersion\""));assert(strstr(json,"\"probe_trace\":null}"));
-    draft.trace_samples=1800;snprintf(draft.trace_file,sizeof draft.trace_file,"1AbC_d-9");
+    draft.trace_samples=1800;snprintf(draft.trace_path,sizeof draft.trace_path,"/brew-%s-trace.csv",draft.id);
     assert(cw_record_json(&draft,"2026-11-02T08:00:00Z",json,sizeof json)>0);puts(json);
     f.stage=CW_REPORT;f.tds_valid=true;f.tds=.9;f.temperature=22.8;f.refraction=1.333;f.extraction=11.79;
-    assert(cw_record_event(&t,CW_TDS,&f,400,&final));final.trace_samples=draft.trace_samples;snprintf(final.trace_file,sizeof final.trace_file,"%s",draft.trace_file);assert(final.complete&&final.revision==2&&!strcmp(final.id,draft.id)&&final.captured_us==draft.captured_us);
+    assert(cw_record_event(&t,CW_TDS,&f,400,&final));final.trace_samples=draft.trace_samples;snprintf(final.trace_path,sizeof final.trace_path,"%s",draft.trace_path);assert(final.complete&&final.revision==2&&!strcmp(final.id,draft.id)&&final.captured_us==draft.captured_us);
     assert(!cw_record_event(&t,CW_REPORT,&f,500,&again));
     assert(cw_record_json(&final,"2026-11-02T08:00:00Z",json,sizeof json)>0);assert(strstr(json,"\"tds_percent\":0.90"));assert(strstr(json,"\"status\":\"complete\""));puts(json);
     assert(!draft.complete&&draft.revision==1); // Queued snapshots are immutable.
@@ -34,8 +34,8 @@ int main(void) {
         draft.brewer=b;assert(cw_record_json(&draft,"2026-11-02T08:00:00Z",json,sizeof json)>0);
         assert(strstr(json,b==CW_SWITCH||b==CW_AEROPRESS?"\"extraction_formula\":\"immersion\"":"\"extraction_formula\":\"beverage\""));
     }
-    snprintf(draft.trace_file,sizeof draft.trace_file,"bad id!");assert(cw_record_json(&draft,"2026-11-02T08:00:00Z",json,sizeof json)<0);
-    snprintf(draft.trace_file,sizeof draft.trace_file,"1AbC_d-9");draft.trace_samples=0;assert(cw_record_json(&draft,"2026-11-02T08:00:00Z",json,sizeof json)<0);
+    snprintf(draft.trace_path,sizeof draft.trace_path,"no-slash.csv");assert(cw_record_json(&draft,"2026-11-02T08:00:00Z",json,sizeof json)<0);
+    snprintf(draft.trace_path,sizeof draft.trace_path,"/brew-%s-trace.csv",draft.id);draft.trace_samples=0;assert(cw_record_json(&draft,"2026-11-02T08:00:00Z",json,sizeof json)<0);
     draft.trace_samples=10;draft.dose_cg=1;assert(cw_record_json(&draft,"2026-11-02T08:00:00Z",json,sizeof json)<0);
     return 0;
 }

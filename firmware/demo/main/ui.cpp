@@ -200,7 +200,7 @@ void ui_draw(const cw_flow_t &s,const UiState &u) {
     else text("--%",254,31,20,battery_color);
     enter=page_enter;
     if(!u.wifi_setup&&u.record_visible&&(s.stage==CW_TDS||s.stage==CW_REPORT||s.stage==CW_CHART)) {
-        const char *label=u.record.state==CW_RECORD_SAVING?"Drive: saving":u.record.state==CW_RECORD_SAVED?"Drive: saved":"Drive: save failed";
+        const char *label=u.record.state==CW_RECORD_SAVING?"Dropbox: saving":u.record.state==CW_RECORD_SAVED?"Dropbox: saved":"Dropbox: save failed";
         text(label,234,438,16,u.record.state==CW_RECORD_SAVED?ACCENT:MUTED);
     }
     if(u.wifi_setup) {
@@ -212,15 +212,14 @@ void ui_draw(const cw_flow_t &s,const UiState &u) {
         const char *states[]={"Not configured","Connecting","Connected","Connection failed","Disconnected"};
         text(states[u.network.state],234,296,26,u.network.state==CW_NET_CONNECTED?ACCENT:MUTED);
         if(u.network.state==CW_NET_CONNECTED)text(u.network.ip,234,326,20,MUTED);
-        if(u.network.drive_state[0]) {
-            const char *drive="Drive not configured";
-            if(!strcmp(u.network.drive_state,"saved"))drive="Drive authorization saved";
-            else if(!strcmp(u.network.drive_state,"requesting_code"))drive="Drive: requesting code";
-            else if(!strcmp(u.network.drive_state,"awaiting_consent"))drive="Drive: approve in browser";
-            else if(!strcmp(u.network.drive_state,"verifying"))drive="Drive: checking read/write";
-            else if(!strcmp(u.network.drive_state,"connected"))drive="Drive read/write verified";
-            else if(!strcmp(u.network.drive_state,"failed"))drive="Drive: check browser";
-            text(drive,234,354,18,MUTED);
+        if(u.network.dropbox_state[0]) {
+            const char *dropbox="Dropbox not configured";
+            if(!strcmp(u.network.dropbox_state,"saved"))dropbox="Dropbox authorization saved";
+            else if(!strcmp(u.network.dropbox_state,"authorizing"))dropbox="Dropbox: authorizing";
+            else if(!strcmp(u.network.dropbox_state,"verifying"))dropbox="Dropbox: checking upload";
+            else if(!strcmp(u.network.dropbox_state,"connected"))dropbox="Dropbox upload verified";
+            else if(!strcmp(u.network.dropbox_state,"failed"))dropbox="Dropbox: check browser";
+            text(dropbox,234,354,18,MUTED);
         }
         bottom("Close",true,u.held==1);return;
     }

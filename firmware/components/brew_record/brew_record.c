@@ -20,7 +20,8 @@ bool cw_record_event(cw_record_tracker_t *t,cw_stage_t before,const cw_flow_t *f
     *out=*r;return true;
 }
 static bool identity(const char *s) {if(!*s)return false;for(;*s;s++)if(!((*s>='0'&&*s<='9')||(*s>='a'&&*s<='z')||(*s>='A'&&*s<='Z')||*s=='-'))return false;return true;}
-static bool drive_id(const char *s) {if(!*s)return false;for(;*s;s++)if(!((*s>='0'&&*s<='9')||(*s>='a'&&*s<='z')||(*s>='A'&&*s<='Z')||*s=='-'||*s=='_'))return false;return true;}
+// Dropbox app-folder path written by this firmware: /name with letters, digits, - _ and .
+static bool app_path(const char *s) {if(*s!='/'||!s[1])return false;for(s++;*s;s++)if(!((*s>='0'&&*s<='9')||(*s>='a'&&*s<='z')||(*s>='A'&&*s<='Z')||*s=='-'||*s=='_'||*s=='.'))return false;return true;}
 static bool utc(const char *s) {
     if(!s||strlen(s)!=20)return false;
     for(unsigned i=0;i<20;i++) {
@@ -37,9 +38,9 @@ int cw_record_json(const cw_brew_record_t *r,const char *created,char *out,size_
         snprintf(measured,sizeof measured,"\"tds_percent\":%.2f,\"extraction_percent\":%.2f,\"sample_temperature_c\":%.1f,\"refractive_index\":%.5f",(double)r->tds,(double)r->extraction,(double)r->temperature,(double)r->refraction);
     } else snprintf(measured,sizeof measured,"\"tds_percent\":null,\"extraction_percent\":null,\"sample_temperature_c\":null,\"refractive_index\":null");
     char trace[384];
-    if(r->trace_file[0]) {
-        if(!drive_id(r->trace_file)||!r->trace_samples)return -1;
-        int t=snprintf(trace,sizeof trace,"{\"name\":\"brew-%s-trace.csv\",\"file_id\":\"%s\",\"sample_rate_hz\":%d,\"samples\":%u,\"truncated\":%s,\"columns\":[\"t_ms\",\"weight_g\",\"probe_c\"]}",r->id,r->trace_file,CW_TRACE_RATE_HZ,r->trace_samples,r->trace_truncated?"true":"false");
+    if(r->trace_path[0]) {
+        if(!app_path(r->trace_path)||!r->trace_samples)return -1;
+        int t=snprintf(trace,sizeof trace,"{\"path\":\"%s\",\"sample_rate_hz\":%d,\"samples\":%u,\"truncated\":%s,\"columns\":[\"t_ms\",\"weight_g\",\"probe_c\"]}",r->trace_path,CW_TRACE_RATE_HZ,r->trace_samples,r->trace_truncated?"true":"false");
         if(t<0||(size_t)t>=sizeof trace)return -1;
     } else snprintf(trace,sizeof trace,"null");
     int n=snprintf(out,cap,"{\"schema_version\":3,\"id\":\"%s\",\"revision\":%u,\"created_at\":\"%s\",\"status\":\"%s\",\"brewer\":\"%s\",\"dose_g\":%.1f,\"water_ml\":%.1f,\"beverage_g\":%.1f,\"empty_server_g\":%.1f,\"elapsed_ms\":%lu,\"brew_ratio\":%.1f,\"retention_g_per_g\":%.2f,\"extraction_formula\":\"%s\",%s,\"probe_trace\":%s}\n",

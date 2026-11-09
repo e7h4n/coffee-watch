@@ -104,19 +104,21 @@ Tests require a C compiler. The native AES harness uses macOS CommonCrypto;
 device firmware uses ESP-IDF mbedTLS. Build outputs, downloaded drivers, and local
 captures are excluded from version control.
 
-## Google Drive setup
+## Dropbox setup
 
-The [device setup page](https://e7h4n.github.io/coffee-watch/) also accepts your
-own Google OAuth client ID and client secret. They are sent to the watch over
-authenticated Bluetooth, not uploaded to the website. The watch performs Google's
-device authorization flow directly over HTTPS and keeps its refresh token locally.
-Use a **TVs and Limited Input devices** client with Google Drive API enabled and
-the `drive.file` scope. Follow the displayed Google authorization link/code.
+The [device setup page](https://e7h4n.github.io/coffee-watch/) links your own
+Dropbox app. In the [Dropbox App Console](https://www.dropbox.com/developers/apps),
+create an app with **Scoped access** and **App folder** access, enable
+`files.content.write` and `files.content.read` under Permissions and press
+Submit. Enter its App key and App secret on the page, open the authorization
+link, allow access on Dropbox and paste the code it shows. The key, secret and
+code go to the watch over authenticated Bluetooth, not to the website. The watch
+exchanges the code with Dropbox for a refresh token, so uploads keep working
+(App Console generated access tokens expire after four hours and are not used).
 
-A successful setup creates the watch's **Coffee Watch** folder and writes/reads
-`connection-check.json` before confirming read/write access. The watch creates a
-brew JSON record when beverage weight is confirmed, uploading the brew's 10 Hz
-weight/temperature trace as a CSV alongside it, then updates the same JSON file
-when a valid TDS measurement arrives. See [Brew records](spec/brew-record.md) and
-[Drive setup](spec/drive.md)
-for configuration, token lifetime, local removal and storage details.
+A successful setup uploads `connection-check.json` to the app folder and checks
+Dropbox's content hash. The watch uploads a brew JSON record when beverage weight
+is confirmed, together with the brew's 10 Hz weight/temperature trace as a CSV,
+then updates the same record when a valid TDS measurement arrives. See
+[Brew records](spec/brew-record.md) and [Dropbox setup](spec/dropbox.md) for
+configuration, storage and verification details.
