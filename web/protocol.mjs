@@ -3,8 +3,8 @@ export const SERVICE = 'c9a81001-9a9d-4f55-a621-5b4e7699b647';
 export const CONFIG = 'c9a81002-9a9d-4f55-a621-5b4e7699b647';
 export const STATUS = 'c9a81003-9a9d-4f55-a621-5b4e7699b647';
 export const SIGNAL = 'c9a81004-9a9d-4f55-a621-5b4e7699b647';
-export const DRIVE_CONFIG = 'c9a81005-9a9d-4f55-a621-5b4e7699b647';
-export const DRIVE_STATUS = 'c9a81006-9a9d-4f55-a621-5b4e7699b647';
+export const DROPBOX_CONFIG = 'c9a81005-9a9d-4f55-a621-5b4e7699b647';
+export const DROPBOX_STATUS = 'c9a81006-9a9d-4f55-a621-5b4e7699b647';
 const encoder = new TextEncoder();
 const requestId = () => crypto.getRandomValues(new Uint32Array(1))[0] || 1;
 export function joinPacket(ssid, password, id = requestId()) {
@@ -19,25 +19,34 @@ export function joinPacket(ssid, password, id = requestId()) {
   return packet;
 }
 export function forgetPacket(id = requestId()) {if (!Number.isInteger(id) || id <= 0 || id > 0xffffffff) throw new Error('Invalid request ID.');const p = new Uint8Array([1, 2, 0, 0, 0, 0, 0, 0]);new DataView(p.buffer).setUint32(4, id, true);return p;}
-export function drivePacket(op, clientId = '', clientSecret = '', id = requestId()) {
-  if (!Number.isInteger(id) || id <= 0 || id > 0xffffffff || ![1, 2, 3].includes(op)) throw new Error('Invalid Drive request.');
-  if (op === 1) {
-    if (!/^[A-Za-z0-9_.-]+\.apps\.googleusercontent\.com$/.test(clientId) || encoder.encode(clientId).length > 128) throw new Error('Enter a valid Google OAuth client ID (up to 128 bytes).');
-    if (!/^[A-Za-z0-9_.-]{1,96}$/.test(clientSecret)) throw new Error('Enter the client secret (up to 96 bytes).');
-  } else if (clientId || clientSecret) throw new Error('This action does not accept credentials.');
-  const name = encoder.encode(clientId), secret = encoder.encode(clientSecret);
-  const packet = new Uint8Array(8 + name.length + secret.length);
-  packet.set([1, op, name.length, secret.length]);new DataView(packet.buffer).setUint32(4, id, true);
-  packet.set(name, 8);packet.set(secret, 8 + name.length);secret.fill(0);return packet;
+const APP_CREDENTIAL = /^[A-Za-z0-9]{1,32}$/;
+// Dropbox shows the authorization code on its own page when no redirect URI is
+// given; token_access_type=offline makes the code exchange return a refresh token.
+// Requesting only the two file scopes keeps any team scope enabled on the app out
+// of the request, which would otherwise demand a work (Business) account.
+export const DROPBOX_SCOPES = 'files.content.write files.content.read';
+export function dropboxAuthorizeUrl(appKey) {
+  if (!APP_CREDENTIAL.test(appKey)) throw new Error('Enter the App key from the Dropbox App Console.');
+  return `https://www.dropbox.com/oauth2/authorize?client_id=${appKey}&response_type=code&token_access_type=offline&scope=${encodeURIComponent(DROPBOX_SCOPES)}`;
 }
-export function decodeDriveStatus(value) {
+export function dropboxPacket(op, appKey = '', appSecret = '', code = '', id = requestId()) {
+  if (!Number.isInteger(id) || id <= 0 || id > 0xffffffff || ![1, 2, 3].includes(op)) throw new Error('Invalid Dropbox request.');
+  if (op === 1) {
+    if (!APP_CREDENTIAL.test(appKey)) throw new Error('Enter the App key from the Dropbox App Console.');
+    if (!APP_CREDENTIAL.test(appSecret)) throw new Error('Enter the App secret from the Dropbox App Console.');
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(code)) throw new Error('Paste the authorization code Dropbox showed after you allowed access.');
+  } else if (appKey || appSecret || code) throw new Error('This action does not accept credentials.');
+  const key = encoder.encode(appKey), secret = encoder.encode(appSecret), grant = encoder.encode(code);
+  const packet = new Uint8Array(9 + key.length + secret.length + grant.length);
+  packet.set([2, op, key.length, secret.length]);new DataView(packet.buffer).setUint32(4, id, true);packet[8] = grant.length;
+  packet.set(key, 9);packet.set(secret, 9 + key.length);packet.set(grant, 9 + key.length + secret.length);secret.fill(0);grant.fill(0);return packet;
+}
+export function decodeDropboxStatus(value) {
   const v = JSON.parse(new TextDecoder('utf-8', {fatal: true}).decode(value));
-  if (v.v !== 1 || !['unconfigured', 'saved', 'requesting_code', 'awaiting_consent', 'verifying', 'connected', 'failed'].includes(v.state) ||
+  if (v.v !== 2 || !['unconfigured', 'saved', 'authorizing', 'verifying', 'connected', 'failed'].includes(v.state) ||
       typeof v.saved !== 'boolean' || !Number.isInteger(v.request) || v.request < 0 || v.request > 0xffffffff ||
-      !['error', 'user_code', 'verification_url', 'folder'].every(k => typeof v[k] === 'string')) throw new Error('The watch returned an unsupported Drive status.');
-  if (v.folder && !/^[A-Za-z0-9_-]{1,64}$/.test(v.folder)) throw new Error('Invalid Drive folder.');
-  if (v.state === 'awaiting_consent' && (!['https://www.google.com/device', 'https://google.com/device', 'https://accounts.google.com/device'].includes(v.verification_url) || !/^[A-Za-z0-9_-]{1,15}$/.test(v.user_code))) throw new Error('Invalid Google authorization link or code.');
-  if (v.state === 'connected' && (!v.saved || !v.folder)) throw new Error('Drive verification is incomplete.');
+      typeof v.error !== 'string') throw new Error('The watch returned an unsupported Dropbox status.');
+  if (v.state === 'connected' && !v.saved) throw new Error('Dropbox verification is incomplete.');
   return v;
 }
 export function decodeStatus(value) {
@@ -59,7 +68,7 @@ export class WatchConnection extends EventTarget {
     if (epoch !== this.epoch) throw new Error('Connection cancelled.');
     this.device = device;
     device.addEventListener('gattserverdisconnected', () => {
-      if (epoch === this.epoch) {this.epoch++;this.pendingRequest = 0;this.pendingDriveRequest = 0;this.queue = Promise.resolve();this.device = null;this.status = null;this.config = null;this.driveConfig = null;this.driveStatus = null;this.emit('disconnected');}
+      if (epoch === this.epoch) {this.epoch++;this.pendingRequest = 0;this.pendingDropboxRequest = 0;this.queue = Promise.resolve();this.device = null;this.status = null;this.config = null;this.dropboxConfig = null;this.dropboxStatus = null;this.emit('disconnected');}
     }, {once: true});
     let step = 'Connecting to watch';
     try {
@@ -70,10 +79,10 @@ export class WatchConnection extends EventTarget {
       const config = await service.getCharacteristic(CONFIG);
       const status = await service.getCharacteristic(STATUS);
       const signal = await service.getCharacteristic(SIGNAL);
-      const driveConfig = await service.getCharacteristic(DRIVE_CONFIG);
-      const driveStatus = await service.getCharacteristic(DRIVE_STATUS);
+      const dropboxConfig = await service.getCharacteristic(DROPBOX_CONFIG);
+      const dropboxStatus = await service.getCharacteristic(DROPBOX_STATUS);
       if (epoch !== this.epoch) throw new Error('Connection cancelled.');
-      this.config = config;this.status = status;this.driveConfig = driveConfig;this.driveStatus = driveStatus;
+      this.config = config;this.status = status;this.dropboxConfig = dropboxConfig;this.dropboxStatus = dropboxStatus;
       // This read requests authenticated encryption. Enter the watch's code
       // in the operating system's pairing dialog, never in this website.
       step = 'Authenticating setup';this.emit('progress', step);
@@ -101,28 +110,28 @@ export class WatchConnection extends EventTarget {
       }
     });
   }
-  async readAll(epoch = this.epoch) {await this.readStatus(epoch);await this.readDriveStatus(epoch);}
-  async readDriveStatus(epoch = this.epoch) {
+  async readAll(epoch = this.epoch) {await this.readStatus(epoch);await this.readDropboxStatus(epoch);}
+  async readDropboxStatus(epoch = this.epoch) {
     return this.operation(async () => {
-      if (epoch !== this.epoch || !this.driveStatus) return;
-      const data = await this.driveStatus.readValue();
+      if (epoch !== this.epoch || !this.dropboxStatus) return;
+      const data = await this.dropboxStatus.readValue();
       if (epoch !== this.epoch) return;
-      const value = decodeDriveStatus(data);
-      if (this.pendingDriveRequest && value.request !== this.pendingDriveRequest) return;
-      if (!['requesting_code', 'awaiting_consent', 'verifying'].includes(value.state)) this.pendingDriveRequest = 0;
-      this.emit('drive-status', value);
+      const value = decodeDropboxStatus(data);
+      if (this.pendingDropboxRequest && value.request !== this.pendingDropboxRequest) return;
+      if (!['authorizing', 'verifying'].includes(value.state)) this.pendingDropboxRequest = 0;
+      this.emit('dropbox-status', value);
     });
   }
-  async writeDrive(packet) {
-    const epoch = this.epoch;this.pendingDriveRequest = new DataView(packet.buffer, packet.byteOffset, packet.byteLength).getUint32(4, true);
+  async writeDropbox(packet) {
+    const epoch = this.epoch;this.pendingDropboxRequest = new DataView(packet.buffer, packet.byteOffset, packet.byteLength).getUint32(4, true);
     try {
       await this.operation(async () => {
-        if (epoch !== this.epoch || !this.driveConfig || !this.device?.gatt.connected) throw new Error('Connect to your watch first.');
-        await this.driveConfig.writeValueWithResponse(packet);
+        if (epoch !== this.epoch || !this.dropboxConfig || !this.device?.gatt.connected) throw new Error('Connect to your watch first.');
+        await this.dropboxConfig.writeValueWithResponse(packet);
       });
       if (epoch !== this.epoch) throw new Error('The watch disconnected before the request completed.');
-      await this.readDriveStatus(epoch);
-    } catch (error) {if (epoch === this.epoch) this.pendingDriveRequest = 0;throw error;} finally {packet.fill(0);}
+      await this.readDropboxStatus(epoch);
+    } catch (error) {if (epoch === this.epoch) this.pendingDropboxRequest = 0;throw error;} finally {packet.fill(0);}
   }
   async write(packet) {
     const epoch = this.epoch;this.pendingRequest = new DataView(packet.buffer, packet.byteOffset, packet.byteLength).getUint32(4, true);
@@ -137,6 +146,6 @@ export class WatchConnection extends EventTarget {
     } catch (error) {if (epoch === this.epoch) this.pendingRequest = 0;throw error;} finally {packet.fill(0);}
   }
   disconnect() {
-    ++this.epoch;this.pendingRequest = 0;this.pendingDriveRequest = 0;this.queue = Promise.resolve();const device = this.device;this.device = null;this.status = null;this.config = null;this.driveConfig = null;this.driveStatus = null;device?.gatt.disconnect();
+    ++this.epoch;this.pendingRequest = 0;this.pendingDropboxRequest = 0;this.queue = Promise.resolve();const device = this.device;this.device = null;this.status = null;this.config = null;this.dropboxConfig = null;this.dropboxStatus = null;device?.gatt.disconnect();
   }
 }

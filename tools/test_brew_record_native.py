@@ -31,8 +31,7 @@ class BrewRecordTests(unittest.TestCase):
             self.assertEqual(final['beverage_g'], 196.5)
             for record in (draft, final):
                 trace = record['probe_trace']
-                self.assertEqual(trace['file_id'], '1AbC_d-9')
-                self.assertEqual(trace['name'], 'brew-' + record['id'] + '-trace.csv')
+                self.assertEqual(trace['path'], '/brew-' + record['id'] + '-trace.csv')
                 self.assertEqual(trace['sample_rate_hz'], 10)
                 self.assertEqual(trace['samples'], 1800)
                 self.assertFalse(trace['truncated'])

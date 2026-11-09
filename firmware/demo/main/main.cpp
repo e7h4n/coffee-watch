@@ -154,8 +154,8 @@ static void receive(const demo_event_t &e) {
         cw_brew_record_t record;
         if(cw_record_event(&records,before,&flow,e.us,&record)) {
             cw_record_status_t pending={};pending.state=CW_RECORD_SAVING;pending.revision=record.revision;snprintf(pending.id,sizeof pending.id,"%s",record.id);ui.record=pending;ui.record_visible=true;
-            // The 10 Hz weight/temperature trace goes to Drive once, with the first draft.
-            drive_setup_record(&record,record.revision==1?probe_trace_snapshot():nullptr);
+            // The 10 Hz weight/temperature trace goes to Dropbox once, with the first draft.
+            dropbox_setup_record(&record,record.revision==1?probe_trace_snapshot():nullptr);
         }
     }
     if(flow.stage==CW_TDS&&!rs_requested) {rs_requested=true;transport_find_rs();}

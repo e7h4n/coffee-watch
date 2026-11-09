@@ -3,11 +3,11 @@
 A record is generated from two accepted sensor transitions:
 
 1. **Beverage → Waiting TDS**: the confirmed beverage weight creates a JSON
-   record in the watch's authorized **Coffee Watch** folder, preceded by the
-   brew's 10 Hz probe trace CSV (see [Probe trace](#probe-trace)). Its status is
+   record in the watch's Dropbox app folder, preceded by the brew's 10 Hz probe
+   trace CSV (see [Probe trace](#probe-trace)). Its status is
    `awaiting_tds`; TDS, extraction, sample temperature and refractive index are
    explicitly `null`.
-2. **Waiting TDS → Report**: an accepted RS measurement updates the same Drive
+2. **Waiting TDS → Report**: an accepted RS measurement updates the same Dropbox
    file to `complete` with those measurement fields. A real zero TDS is `0.00`,
    not `null`.
 
@@ -21,20 +21,21 @@ new identity, including a device/session nonce so IDs are distinct across boots.
 ## Serialization and identity
 
 Each queued snapshot is immutable and includes an increasing revision. The one
-Drive worker executes snapshots in FIFO order: a fast TDS measurement cannot
+Dropbox worker executes snapshots in FIFO order: a fast TDS measurement cannot
 replace or overtake the initial creation. Records from different brews retain
 separate IDs even if uploads overlap a later brew. Older upload results cannot
 replace the status of a newer revision or a newer brew on the watch.
 
 For each upload, the worker loads the saved authorization, synchronizes the
-clock if necessary, refreshes an access token and validates/resolves the
-authorized folder. Revision 1 creates the JSON file. The worker retains Google's
-returned file ID and the record's UTC timestamp, then uses that exact ID for
-subsequent PATCH operations. It validates the file's parent and trash status
-before updating. There is no filename search, status polling or alternate
-creation route for a missing draft. The `coffeeWatchRecord` app property also
-identifies the record for external readers; it is not a substitute for the
-create response. The connection-check file is never used as a brew record.
+clock if necessary and exchanges the refresh token for an access token.
+Revision 1 uploads `/brew-<record-id>.json` with mode `add` and no autorename, so
+an existing file is a conflict rather than a silent replacement. The worker
+retains the returned `rev` and the record's UTC timestamp; later revisions use
+mode `update` with that exact `rev`, so a file changed elsewhere is reported as
+`record_changed_elsewhere` instead of being overwritten. There is no filename
+search, status polling or alternate creation route for a missing draft. Every
+upload is accepted only when Dropbox's `content_hash` of the stored file equals
+the watch's own. The connection-check file is never used as a brew record.
 
 Accepted record events for one brew precede all events of the next brew, and
 the FIFO worker preserves that order. The retained binding is replaced only by
@@ -42,19 +43,17 @@ the next brew's initial draft. A credential change invalidates the binding for
 updates; it cannot redirect an old brew into a newly authorized account.
 
 The initial `created_at` is the beverage event's monotonic timestamp converted
-to UTC after clock synchronization. It is retained with the file ID, also stored in the file's `recordedAt` app
-property, and reused unchanged by subsequent revisions. Filenames are
-`brew-<record-id>.json`. Drive's normal file creation/modification metadata also
+to UTC after clock synchronization. It is retained with the `rev` and reused
+unchanged by subsequent revisions. Dropbox's own server-modified time also
 remains available.
 
-Only a successful upload followed by an exact content read-back reports
-**Drive: saved**. The UI shows saving/saved/save-failed on Waiting TDS and the
+Only a successful upload whose content hash matches reports **Dropbox: saved**. The UI shows saving/saved/save-failed on Waiting TDS and the
 report/chart. Network work never blocks sensor processing or the user interface.
 Missing authorization, network, lookup, create, PATCH and read-back failures are
 explicit. There is no automatic retry, periodic sync check, offline replay or
 alternate storage/upload path. Brew measurements remain available in the local
 workflow when an upload fails. A reboot resets that workflow; already-created
-Drive drafts remain in Drive even if TDS was never measured.
+Dropbox drafts remain in Dropbox even if TDS was never measured.
 
 ## Probe trace
 
@@ -69,8 +68,8 @@ range limit and may be missing.
 
 The trace holds up to 20 minutes (12,000 samples); later samples are dropped and
 the trace is marked truncated. Returning from Ready to Preparation and starting
-again discards it. With the first draft of a brew, the Drive worker uploads it as
-`brew-<record-id>-trace.csv`:
+again discards it. With the first draft of a brew, the Dropbox worker uploads it as
+`/brew-<record-id>-trace.csv` (mode `add`):
 
 ```text
 t_ms,weight_g,probe_c
@@ -83,8 +82,8 @@ t_ms,weight_g,probe_c
 `t_ms` is relative to the scale timer start (the Ready → Brew event), negative
 while waiting for the pour. Weight has one decimal like the rest of the product;
 temperature has two decimals. Missing values are empty fields. Upload is
-verified by comparing Drive's `md5Checksum` and `size` with the local CSV, then
-the record JSON references the file. A failed trace upload fails the draft; no
+verified by comparing Dropbox's `content_hash` with the local CSV, then the
+record JSON references its path. A failed trace upload fails the draft; no
 record is created without the trace it describes. A record whose creation fails
 after the trace upload can leave that CSV in the folder. Later revisions repeat
 the same `probe_trace` object and do not upload the CSV again.
@@ -127,8 +126,7 @@ recorded for the brew.
   "sample_temperature_c": null,
   "refractive_index": null,
   "probe_trace": {
-    "name": "brew-020000000001-0123456789abcdef-00000001-trace.csv",
-    "file_id": "1AbCdEfGhIjKlMnOpQrStUvWxYz",
+    "path": "/brew-020000000001-0123456789abcdef-00000001-trace.csv",
     "sample_rate_hz": 10,
     "samples": 2104,
     "truncated": false,
@@ -137,7 +135,7 @@ recorded for the brew.
 }
 ```
 
-The TDS update preserves `id`, `created_at` and Drive file ID, advances
+The TDS update preserves `id`, `created_at` and the record path, advances
 `revision`, sets `status` to `complete`, and fills the four measurement fields.
 No Wi-Fi password, OAuth client credential, access token or refresh token is
 included in a record.
