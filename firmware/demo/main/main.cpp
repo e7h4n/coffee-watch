@@ -8,6 +8,7 @@
 #include "esp_timer.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
+#include "nvs.h"
 #include "esp_mac.h"
 #include "esp_random.h"
 #include <cstdio>
@@ -25,6 +26,27 @@ static int queued[16];static unsigned queue_read,queue_write;
 extern "C" void demo_post(const demo_event_t *event) {configASSERT(xQueueSend(events,event,0)==pdTRUE);}
 extern "C" void demo_record_status(const cw_record_status_t *status) {demo_event_t e={};e.kind=DE_RECORD;e.us=esp_timer_get_time();e.data.record=*status;demo_post(&e);}
 static int64_t now_us() {return esp_timer_get_time();}
+// The last confirmed brewer is the carousel's starting position after a reboot.
+static unsigned saved_brewer() {
+    nvs_handle_t h;uint8_t v=0;
+    if(nvs_open("cw_ui",NVS_READONLY,&h)==ESP_OK) {nvs_get_u8(h,"brewer",&v);nvs_close(h);}
+    return v%4;
+}
+static void save_brewer(unsigned brewer) {
+    if(brewer==saved_brewer())return;
+    nvs_handle_t h;
+    if(nvs_open("cw_ui",NVS_READWRITE,&h)!=ESP_OK) {ESP_LOGW("flow","brewer not saved");return;}
+    if(nvs_set_u8(h,"brewer",(uint8_t)brewer)!=ESP_OK||nvs_commit(h)!=ESP_OK)ESP_LOGW("flow","brewer not saved");
+    nvs_close(h);
+}
+// Result pages advance every 5 seconds; a manual turn restarts that interval.
+// Turning is display-only, so it never counts as activity for the idle shutdown.
+static constexpr int64_t result_page_us=5000000;
+static void turn_page(int dir,int64_t now) {
+    int n=ui_result_pages(flow);
+    if(n<2||ui.wifi_setup)return;
+    ui.result_page=(ui.result_page+dir+n)%n;ui.page_us=now;render_needed=true;
+}
 // Brew trace: record from Start (Ready) through brewing; stop when the brew stops.
 static cw_stage_t trace_stage=CW_HOME;
 static void trace_follow(int64_t us) {
@@ -52,7 +74,7 @@ static void action(int which) {
     if(ui.wifi_setup) {wifi_setup_close();ui.wifi_setup=false;ui.held=0;render_needed=true;return;}
     if(which==1&&(flow.stage==CW_HOME||(!flow.scale_ready&&flow.stage==CW_BREWER))) {ui.wifi_setup=true;ui.held=0;wifi_setup_open();render_needed=true;return;}
     if(which==1&&flow.stage==CW_BREW&&flow.scale.phase==BOOKOO_STOPPED) {cw_revisit_stopped(&flow);return;}
-    if(which==1&&flow.stage==CW_BREWER) {cw_choose(&flow,flow.brewer);return;}
+    if(which==1&&flow.stage==CW_BREWER) {cw_choose(&flow,flow.brewer);if(flow.stage==CW_EMPTY)save_brewer(flow.brewer);return;}
     if(which==1&&flow.stage==CW_PREP) {
         uint8_t b[6];if(cw_ready_request(&flow,b))transport_write(b,flow.generation);
         return;
@@ -100,6 +122,7 @@ static void input_tick(BoardInput raw,int64_t now) {
         if(in.next&&!in.next_consumed&&now-in.next_start>=650000) {in.next_consumed=true;in.select_consumed=true;back();}
         if(!in.next&&prev_next&&!in.next_consumed&&in.next_gen==flow.generation) {
             if(!ui.wifi_setup&&flow.stage==CW_BREWER)animate(1);
+            else turn_page(1,now);
         }
         if(!in.select&&prev_select&&!in.select_consumed&&in.select_gen==flow.generation)action(1);
     }
@@ -118,7 +141,7 @@ static void input_tick(BoardInput raw,int64_t now) {
             int dx=in.last_x-in.start_x,dy=in.last_y-in.start_y;
             if(!ui.wifi_setup&&std::abs(dx)>50&&std::abs(dx)>std::abs(dy)) {
                 if(flow.stage==CW_BREWER)animate(dx<0?1:-1);
-                else if(flow.stage==CW_REPORT||flow.stage==CW_CHART) {flow.stage=flow.stage==CW_REPORT?CW_CHART:CW_REPORT;flow.generation++;}
+                else turn_page(dx<0?1:-1,now);
             }
         }
     }
@@ -160,7 +183,7 @@ static void receive(const demo_event_t &e) {
     }
     if(flow.stage==CW_TDS&&!rs_requested) {rs_requested=true;transport_find_rs();}
     if(before!=flow.stage) {
-        ui.held=0;
+        ui.held=0;ui.result_page=0;ui.page_us=e.us;
         ESP_LOGI("flow","stage=%u generation=%u brew=%u dose_valid=%u empty=%ld beverage=%ld",flow.stage,flow.generation,flow.scale.brew_id,flow.scale.dose_valid,(long)flow.empty_cg,(long)flow.beverage_cg);
         if(flow.stage==CW_REPORT)ESP_LOGI("flow","REPORT dose=%.1f water=%.1f beverage=%.1f time_ms=%u tds=%.8f extraction=%.8f",flow.scale.result.dose_cg/100.,flow.scale.result.water_cg/100.,flow.beverage_cg/100.,(unsigned)flow.scale.result.elapsed_ms,(double)flow.tds,(double)flow.extraction);
     }
@@ -178,7 +201,7 @@ static void console_task(void *arg) {
 extern "C" void app_main() {
     setvbuf(stdin,nullptr,_IONBF,0);ESP_ERROR_CHECK(nvs_flash_init());
     events=xQueueCreate(128,sizeof(demo_event_t));console_commands=xQueueCreate(4,sizeof(ConsoleCommand));configASSERT(events&&console_commands);
-    cw_init(&flow);board_init();probe_trace_init();ui.battery_percent=board_battery_percent();ui_tick(flow,now_us());ui_draw(flow,ui);board_present();
+    cw_init(&flow);flow.brewer=saved_brewer();board_init();probe_trace_init();ui.battery_percent=board_battery_percent();ui_tick(flow,ui,now_us());ui_draw(flow,ui);board_present();
     uint8_t mac[6];esp_read_mac(mac,ESP_MAC_WIFI_STA);char session[40];
     snprintf(session,sizeof session,"%02x%02x%02x%02x%02x%02x-%08lx%08lx",mac[0],mac[1],mac[2],mac[3],mac[4],mac[5],(unsigned long)esp_random(),(unsigned long)esp_random());cw_record_init(&records,session);
     wifi_setup_init();transport_init();xTaskCreate(console_task,"console",4096,nullptr,2,nullptr);
@@ -238,7 +261,8 @@ extern "C" void app_main() {
             board_shutdown();
             vTaskSuspend(nullptr);
         }
-        if(ui_tick(flow,now))render_needed=true;
+        if(ui_result_pages(flow)>1&&!ui.wifi_setup&&now-ui.page_us>=result_page_us)turn_page(1,now);
+        if(ui_tick(flow,ui,now))render_needed=true;
         if(render_needed&&now-last_draw>=design::motion::frame_us) {ui_draw(flow,ui);board_present();last_draw=now;render_needed=false;}
         vTaskDelay(pdMS_TO_TICKS(5));
     }

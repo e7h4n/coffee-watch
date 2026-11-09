@@ -14,6 +14,11 @@
 - [ ] Weight/ml and calculation inputs have one decimal, correctly rounded.
 - [ ] Only a fresh normal RS result after Waiting TDS produces the report.
 - [ ] Numerical report and chart use identical calculated values.
+- [ ] Lifting the server (beverage frozen) returns the scale to idle and tared;
+      the result and TDS wait are unchanged.
+- [ ] Result pages advance every 5 seconds; swipe/Next turns and restarts the
+      interval; the curve page matches the uploaded trace CSV.
+- [ ] After a reboot or Home the carousel starts at the last confirmed brewer.
 - [ ] Switch and AeroPress report immersion extraction from added water; V60 and
       Hoop report beverage-based extraction.
 - [ ] Back/long Home work; key chords consume short presses.

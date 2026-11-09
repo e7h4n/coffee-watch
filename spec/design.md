@@ -59,6 +59,9 @@ business state or reset the 10-minute idle timer. No other device is queried.
   enter from the bottom edge; missing readings break the line and show `--`.
   The chart redraws at the 10 Hz trace rate, ratio sits below it, and there is no
   bottom action while brewing.
+- Brew curve result page: the same chart drawn from the frozen trace at
+  (88,118), 304×200px, without the live reading and end dot; the accent time
+  label marks the end of the brew. No title or hint text.
 - Brewer carousel: cyclic positioning, scaling and easing with queued input.
 
 ## Motion

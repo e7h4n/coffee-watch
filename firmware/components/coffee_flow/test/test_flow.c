@@ -40,6 +40,16 @@ int main(void) {
     weights(&f,0,60);assert(f.stage==CW_BEVERAGE&&!f.beverage_valid);
     weights(&f,-37000,10);assert(f.stage==CW_BEVERAGE);
     weights(&f,-37000,1);assert(f.stage==CW_TDS&&f.beverage_cg==27000);
+    // Lifting the server re-runs the brewer-confirmation scale init; the result stays.
+    assert(f.reset_step==1&&f.scale_reset);
+    assert(cw_initial_request(&f,reset_packet)&&reset_packet[2]==15);cw_write_done(&f,true);
+    assert(!cw_initial_request(&f,reset_packet));
+    bookoo_message_t ratio_auto={.kind=BOOKOO_MODE,.mode=2,.submode=2};cw_scale_message(&f,7,&ratio_auto,us+1);
+    assert(cw_initial_request(&f,reset_packet)&&reset_packet[2]==24&&reset_packet[3]==1);cw_write_done(&f,true);
+    assert(cw_initial_request(&f,reset_packet)&&reset_packet[2]==7);cw_write_done(&f,true);event(&f,4,0,0);
+    assert(cw_initial_request(&f,reset_packet)&&reset_packet[2]==1);cw_write_done(&f,true);
+    assert(!f.reset_step&&!cw_initial_request(&f,reset_packet));
+    assert(f.stage==CW_TDS&&!f.interrupted&&f.scale.result_valid&&f.beverage_valid&&f.scale.result.water_cg==30000);
     // Final weighing is complete: the scale can power off before TDS arrives.
     cw_scale_link(&f,false,7);
     assert(f.stage==CW_TDS&&!f.interrupted&&f.beverage_valid&&f.scale.result_valid);
@@ -123,6 +133,13 @@ int main(void) {
         assert(fabsf(f.extraction-1.4f/98.6f*20*100)<.001f&&fabsf(f.retention-2.f)<.0001f&&fabsf(f.ratio-20.f)<.0001f);
     }
     assert(cw_brewer_immersion(CW_SWITCH)&&cw_brewer_immersion(CW_AEROPRESS)&&!cw_brewer_immersion(CW_V60)&&!cw_brewer_immersion(CW_HOOP));
+    // A failed post-brew write abandons only that pass. Back from Waiting TDS then
+    // goes Home (the server cannot be re-weighed) and keeps the brewer.
+    brewer=CW_HOOP;stop(&f);weights(&f,-37000,11);assert(f.stage==CW_TDS);
+    assert(cw_initial_request(&f,reset_packet));cw_write_done(&f,false);
+    assert(!f.reset_step&&!f.interrupted&&f.stage==CW_TDS&&!cw_initial_request(&f,reset_packet));
+    cw_back(&f);assert(f.stage==CW_BREWER&&f.brewer==CW_HOOP);
+    cw_home(&f);assert(f.brewer==CW_HOOP);
     brewer=CW_V60;
-    puts("12 full-flow scenarios passed");
+    puts("13 full-flow scenarios passed");
 }

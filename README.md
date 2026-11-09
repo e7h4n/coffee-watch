@@ -23,8 +23,11 @@ together to calculate and present your brew data with minimal manual recording.
 5. **Measure TDS.** Measure your coffee with the refractometer to receive a fresh
    concentration result.
 6. **Review the report.** See coffee dose, added water, beverage mass, brew time,
-   brew ratio, TDS, extraction yield, water retention per gram of coffee, and a
-   Golden Cup chart.
+   brew ratio, TDS, extraction yield, water retention per gram of coffee, a
+   Golden Cup chart and the brew's temperature and water curve. Pages advance
+   every 5 seconds; swipe or press Next to turn them yourself. Lifting the
+   server also returns the scale to its idle, tared state for the next brew,
+   and the watch starts the next brew on the brewer you used last.
 
 Mass and volume use one decimal place. V60 and Hoop use the measured beverage
 mass:

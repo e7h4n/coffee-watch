@@ -38,10 +38,16 @@ navigation, not a second Stop result. Returning to preparation begins a new brew
 connection's explicit scale-stored dose. Ready Back uses 18/01 and waits for Exit
 Ready event 03.
 
-Native test suite: 10 scenarios including complete measurement->report arithmetic,
+Native test suite: 13 scenarios including complete measurement->report arithmetic,
 stale/wrong epoch, thresholds/gaps/drift, event-only command completion, missing
 dose, interrupted state, negative removal/gaps, frozen-result revisiting and Back waiting
 for Stop. Tests use explicit fixture events outside the deployed firmware.
+
+Frozen beverage mass (entering Waiting TDS) runs the same one-pass sequence
+again on `reset_step`, so the scale leaves Auto Done and is tared for the next
+brew while the frozen result stays. Its write failure or a mismatched mode only
+abandons that pass; it never interrupts the TDS wait or report. Back from Waiting
+TDS then goes Home. Home keeps the brewer carousel position.
 
 Brewer confirmation starts a one-pass initialization transaction. A validated
 0E snapshot must confirm Ratio + Auto, then Exit Ready / Exit Done / tare are
