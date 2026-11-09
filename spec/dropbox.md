@@ -13,8 +13,12 @@ then enter the App key and App secret. The page builds Dropbox's authorization
 link from the public App key alone:
 
 ```text
-https://www.dropbox.com/oauth2/authorize?client_id=<app key>&response_type=code&token_access_type=offline
+https://www.dropbox.com/oauth2/authorize?client_id=<app key>&response_type=code&token_access_type=offline&scope=files.content.write%20files.content.read
 ```
+
+The explicit `scope` requests only the two file scopes. Without it Dropbox asks
+for every scope enabled on the app, and any team scope (for example
+`team_data.member`) makes the page demand a work account.
 
 There is no `redirect_uri`, so after the user allows access Dropbox displays an
 authorization code on its own page. The user pastes it into the setup page and

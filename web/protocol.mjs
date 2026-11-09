@@ -22,9 +22,12 @@ export function forgetPacket(id = requestId()) {if (!Number.isInteger(id) || id 
 const APP_CREDENTIAL = /^[A-Za-z0-9]{1,32}$/;
 // Dropbox shows the authorization code on its own page when no redirect URI is
 // given; token_access_type=offline makes the code exchange return a refresh token.
+// Requesting only the two file scopes keeps any team scope enabled on the app out
+// of the request, which would otherwise demand a work (Business) account.
+export const DROPBOX_SCOPES = 'files.content.write files.content.read';
 export function dropboxAuthorizeUrl(appKey) {
   if (!APP_CREDENTIAL.test(appKey)) throw new Error('Enter the App key from the Dropbox App Console.');
-  return `https://www.dropbox.com/oauth2/authorize?client_id=${appKey}&response_type=code&token_access_type=offline`;
+  return `https://www.dropbox.com/oauth2/authorize?client_id=${appKey}&response_type=code&token_access_type=offline&scope=${encodeURIComponent(DROPBOX_SCOPES)}`;
 }
 export function dropboxPacket(op, appKey = '', appSecret = '', code = '', id = requestId()) {
   if (!Number.isInteger(id) || id <= 0 || id > 0xffffffff || ![1, 2, 3].includes(op)) throw new Error('Invalid Dropbox request.');

@@ -90,7 +90,7 @@ test('Dropbox packets carry key, secret and code; status is strictly typed', () 
   assert.throws(() => dropboxPacket(1,'key','secret',''));
   assert.throws(() => dropboxPacket(1,'key','secret','c'.repeat(129)));
   assert.throws(() => dropboxPacket(3,'key','',''));
-  assert.equal(dropboxAuthorizeUrl('abc123'),'https://www.dropbox.com/oauth2/authorize?client_id=abc123&response_type=code&token_access_type=offline');
+  assert.equal(dropboxAuthorizeUrl('abc123'),'https://www.dropbox.com/oauth2/authorize?client_id=abc123&response_type=code&token_access_type=offline&scope=files.content.write%20files.content.read');
   assert.throws(() => dropboxAuthorizeUrl('abc&redirect_uri=x'));
   assert.equal(decodeDropboxStatus(dropboxValue('connected')).state,'connected');
   const v = JSON.parse(new TextDecoder().decode(dropboxValue()));v.state='awaiting_consent';
