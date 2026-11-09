@@ -78,8 +78,16 @@ static void icon(unsigned id,float x,float y,float size,uint32_t color) {
         }
     }
 }
-bool ui_tick(const cw_flow_t &s,int64_t now) {
-    int page=s.interrupted?100:(!s.scale_ready&&s.stage!=CW_TDS&&s.stage!=CW_REPORT&&s.stage!=CW_CHART?101:(int)s.stage);
+static bool has_curve() {probe_reading_t r;probe_trace_reading(&r);return r.brew_started&&!r.active&&r.count>0;}
+int ui_result_pages(const cw_flow_t &s) {
+    if(s.interrupted)return 0;
+    if(s.stage==CW_TDS)return has_curve()?2:1;
+    if(s.stage==CW_REPORT)return has_curve()?3:2;
+    return 0;
+}
+bool ui_curve_page(const cw_flow_t &s,const UiState &u) {return (s.stage==CW_TDS&&u.result_page==1)||(s.stage==CW_REPORT&&u.result_page==2);}
+bool ui_tick(const cw_flow_t &s,const UiState &u,int64_t now) {
+    int page=s.interrupted?100:(!s.scale_ready&&s.stage!=CW_TDS&&s.stage!=CW_REPORT?101:(int)s.stage*4+u.result_page);
     if(page!=previous_page) {previous_page=page;entered_us=now;have_value=false;}
     enter=std::clamp((now-entered_us)/(float)design::motion::enter_us,0.f,1.f);
     enter=1-std::pow(1-enter,3);
@@ -137,21 +145,25 @@ int ui_hit(const cw_flow_t &s,int x,int y,const UiState *u) {
     if((x-234)*(x-234)+(y-233)*(y-233)>233*233)return 0;
     return y>=design::button_top&&ui_enabled(s,1,u)?1:0;
 }
-// Brew screen: live probe temperature and its curve since the pour, with the
-// added-water steps behind it. Fixed 60-100 C axis; time axis per cw_trace_span_ms.
-static void brew_chart() {
-    constexpr int X0=88,X1=392,Y0=142,Y1=306,COLUMNS=X1-X0;
+// Probe temperature curve since the pour, with the added-water steps behind it.
+// Fixed 60-100 C axis; time axis per cw_trace_span_ms. Brewing shows it live with
+// the current reading; the result page shows the same frozen trace that the
+// Dropbox CSV holds, from the pour to the scale's Stop.
+static void trace_chart(int Y0,int Y1,bool live) {
+    constexpr int X0=88,X1=392,COLUMNS=X1-X0;
     constexpr float TMIN=60,TMAX=100;
     static int16_t probe[COLUMNS];static int32_t weight[COLUMNS];
     uint32_t elapsed=0,span=0;
     size_t n=probe_trace_chart(COLUMNS,probe,weight,&elapsed,&span);
-    probe_reading_t now;probe_trace_reading(&now);
     char b[24];
-    if(now.valid) {snprintf(b,sizeof b,"%.1f",(double)now.celsius);text(b,284,96,64,FG,0,false,middle_right);}
-    else text("--",284,96,64,MUTED,0,false,middle_right);
-    // The bundled fonts are ASCII only: draw the degree sign as a small ring.
-    c->fillSmoothCircle(292,101,4,MUTED);c->fillSmoothCircle(292,101,2,BG);
-    text("C",298,108,22,MUTED,0,false,middle_left);
+    if(live) {
+        probe_reading_t now;probe_trace_reading(&now);
+        if(now.valid) {snprintf(b,sizeof b,"%.1f",(double)now.celsius);text(b,284,96,64,FG,0,false,middle_right);}
+        else text("--",284,96,64,MUTED,0,false,middle_right);
+        // The bundled fonts are ASCII only: draw the degree sign as a small ring.
+        c->fillSmoothCircle(292,101,4,MUTED);c->fillSmoothCircle(292,101,2,BG);
+        text("C",298,108,22,MUTED,0,false,middle_left);
+    }
     auto y_of=[&](float celsius){return (int)std::lround(Y1-(Y1-Y0)*(std::clamp(celsius,TMIN,TMAX)-TMIN)/(TMAX-TMIN));};
     for(int deg=70;deg<=100;deg+=10) {int y=y_of(deg);c->drawFastHLine(X0,y,X1-X0,LINE);fmt(X0-22,y,18,MUTED,"%d",deg);}
     float now_x=X0+(float)(X1-X0)*elapsed/span;
@@ -182,7 +194,7 @@ static void brew_chart() {
     // Two-pixel steps keep the antialiased line smooth; the newest column is always drawn.
     for(size_t i=0;i<n;i+=2)visit(i);
     if(n&&(n-1)%2)visit(n-1);
-    if(have&&previous>=TMIN) {c->fillSmoothCircle(px,py,8,BUTTON);c->fillSmoothCircle(px,py,5,ACCENT);}
+    if(live&&have&&previous>=TMIN) {c->fillSmoothCircle(px,py,8,BUTTON);c->fillSmoothCircle(px,py,5,ACCENT);}
     if(n)fmt((int)now_x,Y1+16,18,ACCENT,"%u:%02u",(unsigned)(elapsed/60000),(unsigned)(elapsed/1000%60));
 }
 static void highlights(const cw_flow_t &s,int y) {
@@ -199,7 +211,7 @@ void ui_draw(const cw_flow_t &s,const UiState &u) {
     if(u.battery_percent>=0)fmt(254,31,20,battery_color,"%d%%",u.battery_percent);
     else text("--%",254,31,20,battery_color);
     enter=page_enter;
-    if(!u.wifi_setup&&u.record_visible&&(s.stage==CW_TDS||s.stage==CW_REPORT||s.stage==CW_CHART)) {
+    if(!u.wifi_setup&&u.record_visible&&(s.stage==CW_TDS||s.stage==CW_REPORT)) {
         const char *label=u.record.state==CW_RECORD_SAVING?"Dropbox: saving":u.record.state==CW_RECORD_SAVED?"Dropbox: saved":"Dropbox: save failed";
         text(label,234,438,16,u.record.state==CW_RECORD_SAVED?ACCENT:MUTED);
     }
@@ -227,7 +239,7 @@ void ui_draw(const cw_flow_t &s,const UiState &u) {
         text("Brew interrupted",234,174,36);text(s.error[0]?s.error:"Scale disconnected",234,224,20,MUTED);
         text("Hold both to restart",234,303,19,ACCENT);return;
     }
-    if(!s.scale_ready&&s.stage!=CW_REPORT&&s.stage!=CW_CHART&&s.stage!=CW_TDS) {
+    if(!s.scale_ready&&s.stage!=CW_REPORT&&s.stage!=CW_TDS) {
         text("Connect scale",design::center_x,design::center_y,design::type::status,FG,0,true);bottom("Wi-Fi setup",true,u.held==1);if(s.error[0])text(s.error,234,290,18,MUTED);return;
     }
     char b[64];
@@ -263,7 +275,7 @@ void ui_draw(const cw_flow_t &s,const UiState &u) {
     case CW_READY:
         text("Ready",234,226,design::type::ready,mix(FG,ACCENT,150+(unsigned)(breath*105)));break;
     case CW_BREW: {
-        brew_chart();
+        trace_chart(142,306,true);
         int32_t water=s.scale.phase==BOOKOO_STOPPED?s.scale.result.water_cg:s.live_cg;
         if(s.scale.phase==BOOKOO_STOPPED&&s.scale.result_valid)bottom("Continue",ui_enabled(s,1),u.held==1);
         else if(s.scale.running_dose_valid)fmt(234,362,32,FG,"1:%.1f",(double)water/s.scale.running_dose_cg);
@@ -271,6 +283,7 @@ void ui_draw(const cw_flow_t &s,const UiState &u) {
         break;
     }
     case CW_TDS:
+        if(ui_curve_page(s,u)) {trace_chart(118,318,false);break;}
         snprintf(b,sizeof b,"%.1fg",s.scale.result.dose_cg/100.0);field("Coffee dose",b,151,143,39);
         snprintf(b,sizeof b,"1:%.1f",(double)s.ratio);field("Brew ratio",b,317,143,39);
         snprintf(b,sizeof b,"%.1fg",s.beverage_cg/100.0);field("Beverage",b,151,246,39);
@@ -280,6 +293,18 @@ void ui_draw(const cw_flow_t &s,const UiState &u) {
         else if(s.error[0])text(s.error,234,406,20,MUTED);
         break;
     case CW_REPORT:
+        if(ui_curve_page(s,u)) {trace_chart(118,318,false);break;}
+        if(u.result_page==1) {
+            auto xx=[](float v){return 75+(v-14)*318/12;};
+            auto yy=[](float v){return 307-(v-.8f)*226;};
+            for(float y=1;y<1.81f;y+=.2f) {int py=yy(y);c->drawFastHLine(75,py,318,LINE);fmt(94,py+12,15,MUTED,"%.1f",(double)y);}
+            for(int x: {14,18,22,26}) {int px=xx(x);c->drawFastVLine(px,81,226,LINE);fmt(px+(x==26?-11:11),294,15,MUTED,"%d",x);}
+            int l=xx(18),r=xx(22),top=yy(1.35),bottom_y=yy(1.15);
+            for(int x=l;x<r;x+=10) {c->drawFastHLine(x,top,std::min(5,r-x),ACCENT);c->drawFastHLine(x,bottom_y,std::min(5,r-x),ACCENT);}
+            for(int y=top;y<bottom_y;y+=10) {c->drawFastVLine(l,y,std::min(5,bottom_y-y),ACCENT);c->drawFastVLine(r,y,std::min(5,bottom_y-y),ACCENT);}
+            int px=xx(std::clamp(s.extraction,14.f,26.f)),py=yy(std::clamp(s.tds,.8f,1.8f));
+            c->fillCircle(px,py,8,BUTTON);c->fillCircle(px,py,4,ACCENT);highlights(s,352);break;
+        }
         time_text(s.scale.result.elapsed_ms,234,88,design::type::time);
         snprintf(b,sizeof b,"%.1fg",s.scale.result.dose_cg/100.0);field("Coffee",b,127,164,32,100);
         snprintf(b,sizeof b,"%.1fml",s.scale.result.water_cg/100.0);field("Water",b,234,164,32,100);
@@ -287,16 +312,5 @@ void ui_draw(const cw_flow_t &s,const UiState &u) {
         snprintf(b,sizeof b,"1:%.1f",(double)s.ratio);field("Ratio",b,155,260,34);
         snprintf(b,sizeof b,"%.2fg/g",(double)s.retention);field("Retention",b,313,260,32);
         highlights(s,354);break;
-    case CW_CHART: {
-        auto xx=[](float v){return 75+(v-14)*318/12;};
-        auto yy=[](float v){return 307-(v-.8f)*226;};
-        for(float y=1;y<1.81f;y+=.2f) {int py=yy(y);c->drawFastHLine(75,py,318,LINE);fmt(94,py+12,15,MUTED,"%.1f",(double)y);}
-        for(int x: {14,18,22,26}) {int px=xx(x);c->drawFastVLine(px,81,226,LINE);fmt(px+(x==26?-11:11),294,15,MUTED,"%d",x);}
-        int l=xx(18),r=xx(22),top=yy(1.35),bottom_y=yy(1.15);
-        for(int x=l;x<r;x+=10) {c->drawFastHLine(x,top,std::min(5,r-x),ACCENT);c->drawFastHLine(x,bottom_y,std::min(5,r-x),ACCENT);}
-        for(int y=top;y<bottom_y;y+=10) {c->drawFastVLine(l,y,std::min(5,bottom_y-y),ACCENT);c->drawFastVLine(r,y,std::min(5,bottom_y-y),ACCENT);}
-        int px=xx(std::clamp(s.extraction,14.f,26.f)),py=yy(std::clamp(s.tds,.8f,1.8f));
-        c->fillCircle(px,py,8,BUTTON);c->fillCircle(px,py,4,ACCENT);highlights(s,352);break;
-    }
     }
 }

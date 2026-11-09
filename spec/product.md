@@ -24,8 +24,20 @@ The complete brewing assembly sits on the scale while pouring.
    on the scale; removing it produces negative gross server mass. Beverage mass
    equals -live weight - saved empty-server mass. Require weight < -30.0g,
    positive beverage and <=0.2g variation for 1 second. No final Reset.
+   Once beverage mass is frozen, the brewer-confirmation scale sequence (mode
+   query, Exit Ready, Exit Done, tare) runs once more so the scale is back in
+   its idle, tared state while the result stays on the watch. A mismatched mode
+   or write failure only abandons that pass. After it starts, Back from Waiting
+   TDS returns Home because the server can no longer be re-weighed.
 7. Connect RS and accept a new normal measurement. Show numerical report and
    Golden Cup chart, using the same result.
+8. Result pages: Waiting TDS shows its summary and the brew curve; the report
+   shows the numerical report, the Golden Cup chart and the brew curve. Pages
+   advance every 5 seconds and wrap; a swipe or short Next turns the page and
+   restarts that interval. Page turns are display-only and never count as
+   activity for idle shutdown. The curve page is the frozen probe trace (the
+   data in the Dropbox CSV, from the pour to Stop) and exists once the trace
+   reached the brew start.
 
 ## Precision and calculation
 
@@ -60,11 +72,13 @@ Only a fresh, valid RS result after entering Waiting TDS creates a report.
 
 Dark background, green accent, large values and restrained labels. Swipe or short
 Next cycles the brewer carousel. Only the bottom name/Select confirms selection.
+The carousel starts at the last confirmed brewer (kept in NVS across reboots and
+through Home).
 Select activates the visible enabled bottom action; Next has no preparation
 action. Press highlights, release executes, and dragging outside cancels.
 Hold Next 650ms for Back; hold both keys 900ms for Home, consuming short actions.
 Back during brewing requests Stop and waits for the exact event. Back from Ready
-requests Exit Ready and waits for its event. Reports use swipes, not short keys.
+requests Exit Ready and waits for its event. Result pages turn by swipe or short Next.
 
 ## Idle shutdown
 
