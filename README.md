@@ -112,7 +112,7 @@ captures are excluded from version control.
 The [device setup page](https://e7h4n.github.io/coffee-watch/) links your own
 Dropbox app. In the [Dropbox App Console](https://www.dropbox.com/developers/apps),
 create an app with **Scoped access** and **App folder** access, enable
-`files.content.write` and `files.content.read` under Permissions and press
+`files.content.write`, `files.content.read` and `files.metadata.read` under Permissions and press
 Submit. Enter its App key and App secret on the page, open the authorization
 link, allow access on Dropbox and paste the code it shows. The key, secret and
 code go to the watch over authenticated Bluetooth, not to the website. The watch

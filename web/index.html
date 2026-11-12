@@ -32,6 +32,7 @@
         <button id="connect" class="primary" type="button">Connect watch <span aria-hidden="true">↗</span></button>
         <p id="error" class="error" role="alert" hidden></p>
         <p id="compatibility" class="hint">Use Chrome on a Bluetooth-enabled computer or Android device.</p>
+        <p class="hint">Also sets up <a class="inline-link" href="https://github.com/e7h4n/cardputer-roast" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer">Cardputer Roast ↗</a>: open Rules (O) › network on the Cardputer, then connect it here like a watch.</p>
         <div class="separator"></div>
         <form id="network-form" autocomplete="off">
           <fieldset id="network-fields" disabled>
@@ -49,7 +50,7 @@
         <form id="dropbox-form" autocomplete="off">
           <fieldset id="dropbox-fields" disabled>
             <legend>DROPBOX</legend>
-            <p class="hint">In the <a class="inline-link" href="https://www.dropbox.com/developers/apps" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer">Dropbox App Console ↗</a>, create an app with Scoped access and App folder access. Under Permissions, enable files.content.write and files.content.read, then press Submit. Copy the App key and App secret from Settings.</p>
+            <p class="hint">In the <a class="inline-link" href="https://www.dropbox.com/developers/apps" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer">Dropbox App Console ↗</a>, create an app with Scoped access and App folder access. Under Permissions, enable files.content.write, files.content.read and files.metadata.read, then press Submit. Copy the App key and App secret from Settings.</p>
             <label for="app-key">App key</label>
             <input id="app-key" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="32" placeholder="From the app's Settings tab" required>
             <label for="app-secret">App secret</label>
