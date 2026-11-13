@@ -5,7 +5,7 @@
 Records and probe traces are stored in the user's own Dropbox app folder. In the
 [Dropbox App Console](https://www.dropbox.com/developers/apps), create an app
 with **Scoped access** and **App folder** access. Under **Permissions**, enable
-`files.content.write` and `files.content.read` and press **Submit**. Copy the
+`files.content.write`, `files.content.read` and `files.metadata.read` and press **Submit**. Copy the
 **App key** and **App secret** from **Settings**.
 
 On the setup page, connect the watch over authenticated BLE, connect its Wi-Fi,
@@ -13,10 +13,11 @@ then enter the App key and App secret. The page builds Dropbox's authorization
 link from the public App key alone:
 
 ```text
-https://www.dropbox.com/oauth2/authorize?client_id=<app key>&response_type=code&token_access_type=offline&scope=files.content.write%20files.content.read
+https://www.dropbox.com/oauth2/authorize?client_id=<app key>&response_type=code&token_access_type=offline&scope=files.content.write%20files.content.read%20files.metadata.read
 ```
 
-The explicit `scope` requests only the two file scopes. Without it Dropbox asks
+The explicit `scope` requests only these file scopes (`files.metadata.read` lets a
+device list folders in its app folder; Cardputer Roast uses the same page). Without it Dropbox asks
 for every scope enabled on the app, and any team scope (for example
 `team_data.member`) makes the page demand a work account.
 
