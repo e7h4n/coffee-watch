@@ -16,14 +16,25 @@ int16_t cw_probe_cc(double c) {
     return (int16_t)(c>=0?floor(c*100+.5):-floor(-c*100+.5));
 }
 void cw_trace_init(cw_trace_t *t,cw_trace_sample_t *storage,size_t capacity) {memset(t,0,sizeof *t);t->samples=storage;t->capacity=storage?capacity:0;}
-void cw_trace_start(cw_trace_t *t,int64_t us) {t->count=0;t->active=true;t->brew_started=t->truncated=false;t->start_us=us;t->brew_ms=0;}
-void cw_trace_brew(cw_trace_t *t,int64_t us) {
-    if(!t->active||t->brew_started||us<t->start_us)return;
-    t->brew_started=true;t->brew_ms=(uint32_t)((us-t->start_us)/1000);
+void cw_trace_start(cw_trace_t *t,int64_t us) {t->count=0;t->active=true;t->brew_started=t->truncated=false;t->start_us=us;t->brew_ms=0;t->zero_cg=0;}
+void cw_trace_brew(cw_trace_t *t,int64_t us,int32_t zero_cg) {
+    if(!t->active||t->brew_started)return;
+    // The pour onset is found after the fact and can precede Start by a few
+    // hundred ms; the trace cannot hold samples from before its own start.
+    if(us<t->start_us)us=t->start_us;
+    t->zero_cg=zero_cg;t->brew_started=true;t->brew_ms=(uint32_t)((us-t->start_us)/1000);
 }
 void cw_trace_stop(cw_trace_t *t) {t->active=false;}
 bool cw_trace_append(cw_trace_t *t,int64_t us,int32_t weight_cg,int16_t probe_cc) {
     if(!t->active||us<t->start_us)return false;
+    if(!t->brew_started&&t->capacity>=2*CW_TRACE_PREROLL&&t->count>=2*CW_TRACE_PREROLL) {
+        // Drop the oldest pre-roll and re-base time on the first kept sample.
+        size_t drop=t->count-CW_TRACE_PREROLL;uint32_t cut=t->samples[drop].t_ms;
+        memmove(t->samples,t->samples+drop,CW_TRACE_PREROLL*sizeof *t->samples);
+        t->count=CW_TRACE_PREROLL;
+        for(size_t i=0;i<t->count;i++)t->samples[i].t_ms-=cut;
+        t->start_us+=(int64_t)cut*1000;
+    }
     if(t->count>=t->capacity) {t->truncated=true;return false;}
     t->samples[t->count++]=(cw_trace_sample_t){.t_ms=(uint32_t)((us-t->start_us)/1000),.weight_cg=weight_cg,.probe_cc=probe_cc};
     return true;
@@ -64,7 +75,7 @@ size_t cw_trace_series(const cw_trace_t *t,uint32_t span_ms,size_t columns,int16
         if(s->t_ms<t->brew_ms)continue;
         uint64_t column=(uint64_t)(s->t_ms-t->brew_ms)*columns/span_ms;
         if(column>=columns)break;
-        probe_cc[column]=s->probe_cc;weight_cg[column]=s->weight_cg;used=(size_t)column+1;
+        probe_cc[column]=s->probe_cc;weight_cg[column]=s->weight_cg==CW_TRACE_NO_WEIGHT?CW_TRACE_NO_WEIGHT:s->weight_cg-t->zero_cg;used=(size_t)column+1;
     }
     return used;
 }

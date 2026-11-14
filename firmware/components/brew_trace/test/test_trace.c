@@ -18,7 +18,7 @@ int main(void) {
     cw_trace_start(&t,1000000);
     assert(cw_trace_append(&t,1000000,0,2210));
     assert(cw_trace_append(&t,1100000,CW_TRACE_NO_WEIGHT,2215));
-    cw_trace_brew(&t,1250000);cw_trace_brew(&t,9000000);assert(t.brew_started&&t.brew_ms==250);
+    cw_trace_brew(&t,1250000,0);cw_trace_brew(&t,9000000,0);assert(t.brew_started&&t.brew_ms==250);
     assert(cw_trace_append(&t,1300000,1234,CW_TRACE_NO_PROBE));
     assert(cw_trace_append(&t,1400000,-56,-150));
     assert(!cw_trace_append(&t,1500000,0,0)&&t.truncated&&t.count==4);
@@ -33,13 +33,25 @@ int main(void) {
     cw_trace_sample_t many[40];cw_trace_init(&t,many,40);cw_trace_start(&t,0);
     int16_t probe[10];int32_t weight[10];
     assert(cw_trace_series(&t,1000,10,probe,weight)==0&&cw_trace_elapsed_ms(&t)==0);
-    for(int i=0;i<30;i++) {if(i==5)cw_trace_brew(&t,500000);cw_trace_append(&t,i*100000,i*100,(int16_t)(9000+i));}
+    for(int i=0;i<30;i++) {if(i==5)cw_trace_brew(&t,500000,0);cw_trace_append(&t,i*100000,i*100,(int16_t)(9000+i));}
     // 25 samples after the 500 ms brew start; a 4 s span over 10 columns is 400 ms per column.
     assert(cw_trace_elapsed_ms(&t)==2400);
     size_t cols=cw_trace_series(&t,4000,10,probe,weight);
     assert(cols==7&&probe[0]==9008&&weight[0]==800&&probe[6]==9029&&weight[6]==2900);
     for(size_t i=cols;i<10;i++)assert(probe[i]==CW_TRACE_NO_PROBE&&weight[i]==CW_TRACE_NO_WEIGHT);
     assert(cw_trace_series(&t,1000,10,probe,weight)==10&&probe[9]==9014);
+    // The chart reports weight relative to the brew zero; an onset before Start clamps.
+    cw_trace_start(&t,1000000);for(int i=0;i<20;i++)cw_trace_append(&t,1000000+i*100000,40000+i*100,9000);
+    cw_trace_brew(&t,700000,40000);assert(t.brew_started&&t.brew_ms==0&&t.zero_cg==40000);
+    assert(cw_trace_series(&t,2000,10,probe,weight)==10&&weight[0]==100&&weight[9]==1900);
+    // A long wait before the pour keeps only a rolling pre-roll; time stays continuous.
+    static cw_trace_sample_t pre[600];cw_trace_init(&t,pre,600);cw_trace_start(&t,0);
+    for(int i=0;i<3000;i++)cw_trace_append(&t,(int64_t)i*100000,40000,2000);
+    assert(t.count>CW_TRACE_PREROLL&&t.count<=2*CW_TRACE_PREROLL&&!t.truncated);
+    assert(t.start_us+(int64_t)t.samples[t.count-1].t_ms*1000==299900000);
+    cw_trace_brew(&t,299900000,40000);assert(t.brew_ms==t.samples[t.count-1].t_ms);
+    for(int i=0;i<300;i++)cw_trace_append(&t,300000000+(int64_t)i*100000,40000+i,2000);
+    assert(t.count>2*CW_TRACE_PREROLL&&cw_trace_elapsed_ms(&t)==30000);
     fputs(csv,stdout);puts("trace tests passed");
     return 0;
 }

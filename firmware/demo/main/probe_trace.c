@@ -57,8 +57,9 @@ static void probe_task(void *arg) {
         int64_t now=esp_timer_get_time();
         xSemaphoreTake(lock,portMAX_DELAY);
         cw_trace_append(&trace,now,weight_cg,cw_probe_cc(celsius));
+        unsigned seq=latest.seq+1;
         latest=(probe_reading_t){.valid=isfinite(celsius),.active=trace.active,.brew_started=trace.brew_started,.truncated=trace.truncated,
-            .celsius=(float)celsius,.ratio=(float)ratio,.ntc_mv=ntc,.ref_mv=ref,.count=(unsigned)trace.count};
+            .celsius=(float)celsius,.ratio=(float)ratio,.ntc_mv=ntc,.ref_mv=ref,.count=(unsigned)trace.count,.seq=seq,.us=now};
         xSemaphoreGive(lock);
         vTaskDelayUntil(&wake,pdMS_TO_TICKS(CW_TRACE_PERIOD_US/1000));
     }
@@ -81,7 +82,7 @@ void probe_trace_init(void) {
     configASSERT(xTaskCreate(probe_task,"probe",4096,NULL,4,NULL)==pdPASS);
 }
 void probe_trace_start(int64_t us) {xSemaphoreTake(lock,portMAX_DELAY);cw_trace_start(&trace,us);xSemaphoreGive(lock);ESP_LOGI(TAG,"trace started");}
-void probe_trace_brew(int64_t us) {xSemaphoreTake(lock,portMAX_DELAY);cw_trace_brew(&trace,us);uint32_t ms=trace.brew_ms;xSemaphoreGive(lock);ESP_LOGI(TAG,"brew start at %lu ms",(unsigned long)ms);}
+void probe_trace_brew(int64_t us,int32_t zero_cg) {xSemaphoreTake(lock,portMAX_DELAY);cw_trace_brew(&trace,us,zero_cg);uint32_t ms=trace.brew_ms;xSemaphoreGive(lock);ESP_LOGI(TAG,"brew start at %lu ms",(unsigned long)ms);}
 void probe_trace_stop(void) {
     xSemaphoreTake(lock,portMAX_DELAY);bool was=trace.active;cw_trace_stop(&trace);size_t n=trace.count;xSemaphoreGive(lock);
     if(was)ESP_LOGI(TAG,"trace stopped with %u samples",(unsigned)n);
@@ -96,6 +97,7 @@ cw_trace_snapshot_t *probe_trace_snapshot(void) {
         if(s) {
             s->count=trace.count;s->brew_ms=trace.brew_ms;s->truncated=trace.truncated;s->samples=(cw_trace_sample_t*)(s+1);
             memcpy(s->samples,trace.samples,trace.count*sizeof(cw_trace_sample_t));
+            for(size_t i=0;i<s->count;i++)if(s->samples[i].weight_cg!=CW_TRACE_NO_WEIGHT)s->samples[i].weight_cg-=trace.zero_cg;
         }
     }
     xSemaphoreGive(lock);

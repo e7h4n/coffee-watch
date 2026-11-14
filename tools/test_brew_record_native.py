@@ -14,7 +14,7 @@ class BrewRecordTests(unittest.TestCase):
                             '-I', str(root / 'brew_record/include'), '-I', str(root / 'coffee_flow/include'),
                             '-I', str(root / 'bookoo/include'), '-I', str(root / 'difluid_rs/include'),
                             '-I', str(root / 'brew_trace/include'),
-                            str(root / 'brew_record/brew_record.c'), str(root / 'coffee_flow/coffee_flow.c'),
+                            str(root / 'brew_record/brew_record.c'), str(root / 'coffee_flow/coffee_flow.c'), str(root / 'coffee_flow/pour.c'),
                             str(root / 'bookoo/bookoo.c'), str(root / 'brew_record/test/test_brew_record.c'),
                             '-lm', '-o', binary], check=True, capture_output=True, text=True, timeout=60)
             result = subprocess.run([binary], check=True, capture_output=True, text=True, timeout=10)

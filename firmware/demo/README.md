@@ -1,7 +1,7 @@
 # Coffee Watch hardware demo
 
 Native ESP32-S3 firmware for the physical M5Stack StopWatch, BOOKOO Themis Ultra
-4.0.1 (Ratio + Auto), and DiFluid RS v002-005. All pages from the accepted browser
+4.0.1 (Ratio mode), the bed probe, and DiFluid RS v002-005. All pages from the accepted browser
 prototype are implemented: brewer carousel, empty-server capture, single-Start preparation and Auto Ready,
 brewing, beverage capture, Waiting TDS, numerical report and Golden Cup chart.
 The browser's R2 placeholder is replaced by the actual validated RS interface.
@@ -33,8 +33,9 @@ Start serial capture before connecting BLE; closing USB can reset StopWatch.
 
 ## Walkthrough
 
-1. Disconnect the phone apps. Enable
-   **Ratio + Auto**. Keep the platform empty when powering the watch.
+1. Disconnect the phone apps. Put the scale in **Ratio** mode (manual or Auto
+   submode; the watch never arms Auto). Keep the platform empty when powering
+   the watch.
 2. The watch finds the scale, discovers service/characteristics, subscribes to
    **both** FF12 and FF11, then opens the brewer carousel.
 3. Swipe or short Next to choose V60 / Switch / AeroPress / Hoop. Confirm by
@@ -48,16 +49,18 @@ Start serial capture before connecting BLE; closing USB can reset StopWatch.
    powering on the watch. The watch reads the stored dose with official command
    14 / response 10, preserves it across UI navigation in the same connection,
    and consumes later explicit 0F changes. No resaving is required here.
-6. Place the full brewing assembly and release the single watch **Start** button
-   (or Select). It writes Auto Ready 18/00 and shows Ready only after event 02.
-   It does not start timing. Pouring causes the real Start event to enter brewing.
-   Stop works from watch/Select or the scale;
-   only the actual Stop notification freezes time, dose and added water.
-7. After confirmed Stop, the watch shows `Remove server`. Lift the server off
-   the scale; no Reset or other key is needed.
-8. BOOKOO Auto Done reports negative gross server mass. Beverage is its absolute
-   value minus the saved empty-server mass. Weight < -30.0g and positive beverage,
-   stable within 0.2g for 1 second of notifications, enters `Waiting TDS`.
+6. With the dose known, the watch shows Ready by itself: pour detection is armed
+   and nothing is written to the scale. Place the full brewing assembly with the
+   bed probe in the grounds. If rinsing the paper with the probe in the dripper
+   starts a brew, Back discards it and re-arms. Pouring brings hot water to the
+   probe: a 3.0 °C rise plus a 0.5g weight rise enters brewing, with the zero taken
+   from the stable weight just before the pour and time from its onset. Do not
+   press the scale's keys while brewing.
+7. Lift the dripper off the server when done. A settled drop of 30.0g or more
+   freezes time, dose and added water; no watch or scale key is needed.
+8. Leave the server on the scale. Beverage is live weight minus the saved
+   empty-server mass; positive and stable within 0.2g for 1 second of
+   notifications, it enters `Waiting TDS`.
 9. Only now the watch discovers/connects/subscribes RS FF01. Perform a **new**
    normal RS measurement. Exact level-1, CRC-valid single-result events produce
    the report; calibration/other routes, errors and earlier results do not.
@@ -101,8 +104,8 @@ in the terminal while preserving them in the log. Keep a single serial session.
 
 ## Validation boundaries
 
-The portable `coffee_flow` native tests cover complete measured data flow, exact
-Start/Stop gating, Reset without a synthetic ACK, strict stability, missing dose,
+The portable `coffee_flow` native tests cover complete measured data flow, pour
+detection and its zero, dripper-lift detection, Reset without a synthetic ACK, strict stability, missing dose,
 stale TDS, error results, frozen Stop evidence, disconnect and Back navigation.
 They complement the previously verified physical BLE protocols. The complete
 human hardware walkthrough and physical visual/button/touch acceptance are
@@ -110,11 +113,10 @@ summarized by the acceptance checklist; implementation alone is not proof of
 every physical acceptance check passing.
 
 
-Auto Ready interfaces come from the official BOOKOO N 3.8.2 Android client.
-`03 0A 18 00 00 11` -> Ready event 02; `03 0A 18 01 00 10` -> Exit Ready event 03.
-Ready is a distinct read-only page; timing begins only on Start event 01.
-The preparation page has no Reset or manual timer-start action. A pending Ready
-write cannot complete via ATT success, normal weight, elapsed time or another event.
+The watch owns the brew: it never sends Auto Ready or a timer command, and an
+Auto event during a brew interrupts it, because Auto re-tares the scale on its own.
+Ready is a distinct read-only page; timing begins only at the detected pour onset.
+The preparation page has no Reset or manual timer-start action.
 
 Stored dose acquisition is one post-subscription query `03 0A 14 00 00 1D`, with
 CRC/XOR-validated response `03 10` and unsigned BE24 centigrams at offsets 6..8.
@@ -162,12 +164,12 @@ requires the scale; if it is off, Back returns Home for an explicit new session.
 ## Brewer selection initializes the scale
 
 Confirming a brewer displays Preparing scale and blocks empty-server capture.
-A single mode query (0F -> 0E) must report Ratio (byte 2 = 2) and its Auto submode
-(byte 5 = 2). Unsupported configuration is an explicit interruption. Then a fixed
-single-pass sequence dispatches Exit Ready (18/01), Exit Done (07), and tare (01),
-in this order. Each write is sent once, serialized by its ATT result; there is no
-retry or alternate sequence. Exit Ready prevents 07 from starting a Ready scale;
-in Auto Idle, 07 is a documented no-op. Done exit is event 04 when applicable.
+A single mode query (0F -> 0E) must report Ratio (byte 2 = 2); any other mode is
+an explicit interruption. In the Auto submode (byte 5 = 2) a fixed single-pass
+sequence dispatches Exit Ready (18/01) and Exit Done (07) before the tare (01);
+other submodes tare only. Each write is sent once, serialized by its ATT result;
+there is no retry or alternate sequence. Exit Ready prevents 07 from starting a
+Ready scale; in Auto Idle, 07 is a documented no-op.
 ATT success is dispatch status, never a tare-completed assertion. Only subsequent
 actual weight notifications can complete the independent 5-second empty-server
 capture rule. Mode query or write failure cannot advance capture.

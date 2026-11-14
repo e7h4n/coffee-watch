@@ -12,8 +12,8 @@ class FlowNativeTests(unittest.TestCase):
             executable = str(Path(temp) / 'test_flow')
             subprocess.run([os.environ.get('CC', 'cc'), '-std=c11', '-Wall', '-Wextra', '-Werror',
                             '-I', str(root / 'coffee_flow/include'), '-I', str(root / 'bookoo/include'),
-                            '-I', str(root / 'difluid_rs/include'), str(root / 'coffee_flow/coffee_flow.c'),
+                            '-I', str(root / 'difluid_rs/include'), str(root / 'coffee_flow/coffee_flow.c'), str(root / 'coffee_flow/pour.c'),
                             str(root / 'bookoo/bookoo.c'), str(root / 'coffee_flow/test/test_flow.c'),
                             '-lm', '-o', executable], check=True, capture_output=True, text=True, timeout=60)
             result = subprocess.run([executable], check=True, capture_output=True, text=True, timeout=10)
-            self.assertIn('13 full-flow scenarios passed', result.stdout)
+            self.assertIn('20 full-flow scenarios passed', result.stdout)

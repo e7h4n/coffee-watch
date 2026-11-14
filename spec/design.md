@@ -49,19 +49,28 @@ business state or reset the 10-minute idle timer. No other device is queried.
   Its progress comes exclusively from the notification-driven business window.
 - Connection, initialization and TDS waits use their text status without spinners.
 - Ready: subtly breathing text color; no outline, fabricated progress or countdown.
-- Brew chart: probe temperature at 64px with a drawn degree ring (fonts are
-  ASCII), then a 304×164px chart at (88,142): fixed 60–100 °C axis with
-  70/80/90/100 grid, minute grid and labels, the current time in accent at the
-  newest sample, and a 3px antialiased accent curve ending in a dot. Added water
-  is drawn behind it as #223028 steps with a #55685c edge, scaled to max(300 ml,
-  1.15 × water) and labeled in ml. The axis spans 2:30, then 4:00, 6:00 and further
-  two-minute steps; the curve compresses rather than scrolls. Readings below 60 °C
-  enter from the bottom edge; missing readings break the line and show `--`.
-  The chart redraws at the 10 Hz trace rate, ratio sits below it, and there is no
-  bottom action while brewing.
+  It arms itself, so `Pour to start` (26) sits above it at y=124, Ready (60) at
+  y=190, and Dose / Bed labels (22) at y=266 with 40px values at y=300.
+- Brew page (the scale display no longer shows added water, so the watch does):
+  water as the 90px hero at (222,124) with `ml` (26) after it; Ratio and Bed
+  labels (22) at y=194 over 40px values at y=228, the ratio in accent and the bed
+  temperature with a drawn degree ring (fonts are ASCII); a compact live chart at
+  (88,264)-(380,334); the brew clock (64) at y=396 in the free bottom of the round
+  screen, below the battery-only top. The chart band keeps the fixed 60-100 °C
+  grid, minute grid, added-water steps (#223028 with a #55685c edge, scaled to
+  max(300 ml, 1.15 × water)), a 3px accent curve and its end dot, with no axis,
+  ml or time labels. Water changes with every notification while pouring, so it
+  never value-flashes. The chart and clock redraw at the 10 Hz trace rate and there
+  is no bottom action while brewing.
+- Stopped brew (revisited after the dripper lift): the same water and ratio,
+  Dose instead of Bed, the frozen brew time in accent at y=296, and Continue as the
+  bottom action; no chart.
 - Brew curve result page: the same chart drawn from the frozen trace at
-  (88,118), 304×200px, without the live reading and end dot; the accent time
-  label marks the end of the brew. No title or hint text.
+  (88,118), 304×200px, without the end dot, with 70/80/90/100 and minute labels and
+  the water labeled in ml; the accent time label marks the end of the brew. No
+  title or hint text. Both charts span 2:30, then 4:00, 6:00 and further two-minute
+  steps; the curve compresses rather than scrolls. Readings below 60 °C enter from
+  the bottom edge; missing readings break the line.
 - Brewer carousel: cyclic positioning, scaling and easing with queued input.
 
 ## Motion

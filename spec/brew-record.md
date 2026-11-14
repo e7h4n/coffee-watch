@@ -15,7 +15,7 @@ The normal event/epoch and stability checks remain in the brewing state machine.
 Raw weight notifications, stale RS results, page rendering, navigation to the
 chart and repeated measurements after the report do not generate uploads.
 Returning to beverage weighing updates the existing brew identity when the
-weight is confirmed again. A new confirmed Ready → Brew transition allocates a
+weight is confirmed again. A new detected pour (Ready → Brew) allocates a
 new identity, including a device/session nonce so IDs are distinct across boots.
 
 ## Serialization and identity
@@ -57,7 +57,7 @@ Dropbox drafts remain in Dropbox even if TDS was never measured.
 
 ## Probe trace
 
-From the moment Start is accepted (Ready) until the brew stops (Brew →
+From Ready (armed by itself during preparation) until the brew stops (Brew →
 Beverage), a 10 Hz task samples the latest scale weight and the bed-probe
 temperature. The probe is a 100 kΩ B3950 NTC on the StopWatch back header: 3V3
 → 10 kΩ → G8 → NTC → GND, with G9 = 3V3/2 from two 10 kΩ resistors. Both are
@@ -67,8 +67,9 @@ missing value, not a temperature. Readings below roughly 25 °C are near the ADC
 range limit and may be missing.
 
 The trace holds up to 20 minutes (12,000 samples); later samples are dropped and
-the trace is marked truncated. Returning from Ready to Preparation and starting
-again discards it. With the first draft of a brew, the Dropbox worker uploads it as
+the trace is marked truncated. Ready arms itself during preparation, so until the
+pour the trace keeps only a rolling 10-20 s pre-roll. Leaving Ready, or discarding
+a brew with Back, discards it. With the first draft of a brew, the Dropbox worker uploads it as
 `/brew-<record-id>-trace.csv` (mode `add`):
 
 ```text
@@ -79,8 +80,9 @@ t_ms,weight_g,probe_c
 100,1.8,92.98
 ```
 
-`t_ms` is relative to the scale timer start (the Ready → Brew event), negative
-while waiting for the pour. Weight has one decimal like the rest of the product;
+`t_ms` is relative to the detected pour onset (the first weight 0.3g above the
+brew's zero), negative while waiting for the pour. Weight is relative to that zero,
+so rows before the pour read about 0.0 even though the scale is not tared there. Weight has one decimal like the rest of the product;
 temperature has two decimals. Missing values are empty fields. Upload is
 verified by comparing Dropbox's `content_hash` with the local CSV, then the
 record JSON references its path. A failed trace upload fails the draft; no
@@ -92,8 +94,9 @@ the same `probe_trace` object and do not upload the CSV again.
 
 Mass/volume fields use the product's 0.1g/ml rounding before calculations.
 The ratio has one decimal place, retention and extraction have two, TDS has two,
-sample temperature has one and refractive index has five. `elapsed_ms` preserves
-the scale's frozen brew duration. TDS and extraction match the existing report.
+sample temperature has one and refractive index has five. `elapsed_ms` is the
+watch-measured brew time, from the pour onset to the last settled level before
+the dripper lift. TDS and extraction match the existing report.
 
 `extraction_formula` names how `extraction_percent` was calculated and is present
 in drafts as well: `"immersion"` for Switch (valve-closed steep, then full drain)

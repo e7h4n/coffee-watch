@@ -13,21 +13,22 @@ together to calculate and present your brew data with minimal manual recording.
    the platform empty until initialization finishes.
 2. **Weigh the empty server.** Capture its mass automatically. Coffee dose comes
    from the value you saved on the scale during bean preparation.
-3. **Start brewing.** Tap Start to arm Auto READY. Pouring starts the timer through
-   the scale's own event, while the watch displays added water and brew ratio.
-   From Start until the brew stops, the watch records weight and bed-probe
-   temperature 10 times per second.
-4. **Capture beverage mass.** After removing the dripper triggers Stop, follow the
-   prompt to lift the server. Beverage mass is calculated automatically without
-   another manual tare.
+3. **Start brewing.** Just pour; there is no Start button. Once the empty server
+   and dose are known the watch is Ready, and it starts the brew itself when hot
+   water reaches the bed probe, without the scale's Auto mode. Water poured
+   before the probe reacts still counts: the zero is the last stable weight in the
+   5 seconds before the pour. The watch displays added water and brew ratio, and
+   records weight and bed-probe temperature 10 times per second.
+4. **Capture beverage mass.** Lift the dripper off the server; the watch detects
+   the lift and stops the brew. Leave the server on the scale and the beverage
+   mass is calculated automatically without another tare.
 5. **Measure TDS.** Measure your coffee with the refractometer to receive a fresh
    concentration result.
 6. **Review the report.** See coffee dose, added water, beverage mass, brew time,
    brew ratio, TDS, extraction yield, water retention per gram of coffee, a
    Golden Cup chart and the brew's temperature and water curve. Pages advance
-   every 5 seconds; swipe or press Next to turn them yourself. Lifting the
-   server also returns the scale to its idle, tared state for the next brew,
-   and the watch starts the next brew on the brewer you used last.
+   every 5 seconds; swipe or press Next to turn them yourself. The watch starts
+   the next brew on the brewer you used last.
 
 Mass and volume use one decimal place. V60 and Hoop use the measured beverage
 mass:
@@ -55,9 +56,9 @@ this interval.
 | Device | Role | Validated version |
 | --- | --- | --- |
 | M5Stack StopWatch | Interaction, device connections, and reports | ESP32-S3 |
-| BOOKOO Themis Ultra | Coffee dose, weight, and brewing timer | Firmware 4.0.1, Ratio + Auto mode |
+| BOOKOO Themis Ultra | Coffee dose and weight | Firmware 4.0.1, Ratio mode (Auto not used) |
 | DiFluid RS | TDS measurement | Firmware v002-005 |
-| Bed probe | Brew temperature trace | 100 kΩ B3950 NTC on G8, G9 = 3V3/2 reference |
+| Bed probe | Brew start and temperature trace | 100 kΩ B3950 NTC on G8, G9 = 3V3/2 reference |
 
 This is a prototype with real brewing walkthroughs completed. The firmware
 connects to the two peers configured in its transport; a general device picker
