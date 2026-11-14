@@ -11,11 +11,11 @@ bool cw_record_event(cw_record_tracker_t *t,cw_stage_t before,const cw_flow_t *f
         snprintf(t->record.id,sizeof t->record.id,"%s-%08x",t->session,t->sequence);
     }
     bool draft=before==CW_BEVERAGE&&f->stage==CW_TDS,complete=before==CW_TDS&&f->stage==CW_REPORT;
-    if((complete&&!f->tds_valid)||(!draft&&!complete)||!t->record.id[0]||f->interrupted||!f->beverage_valid||!f->scale.result_valid||!f->scale.result.dose_valid||!f->scale.result.water_valid||f->scale.result.dose_cg<=0)return false;
+    if((complete&&!f->tds_valid)||(!draft&&!complete)||!t->record.id[0]||f->interrupted||!f->beverage_valid||!f->result_valid||!f->result.dose_valid||!f->result.water_valid||f->result.dose_cg<=0)return false;
     cw_brew_record_t *r=&t->record;
     if(!r->revision)r->captured_us=us;
-    r->revision++;r->brewer=f->brewer;r->dose_cg=cw_mass_cg(f->scale.result.dose_cg);r->water_cg=cw_mass_cg(f->scale.result.water_cg);
-    r->beverage_cg=cw_mass_cg(f->beverage_cg);r->empty_cg=cw_mass_cg(f->empty_cg);r->elapsed_ms=f->scale.result.elapsed_ms;r->complete=complete&&f->tds_valid;
+    r->revision++;r->brewer=f->brewer;r->dose_cg=cw_mass_cg(f->result.dose_cg);r->water_cg=cw_mass_cg(f->result.water_cg);
+    r->beverage_cg=cw_mass_cg(f->beverage_cg);r->empty_cg=cw_mass_cg(f->empty_cg);r->elapsed_ms=f->result.elapsed_ms;r->complete=complete&&f->tds_valid;
     r->tds=r->complete?f->tds:0;r->temperature=r->complete?f->temperature:0;r->refraction=r->complete?f->refraction:0;r->extraction=r->complete?f->extraction:0;
     *out=*r;return true;
 }

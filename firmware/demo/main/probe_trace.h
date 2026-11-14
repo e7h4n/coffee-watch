@@ -11,14 +11,16 @@ extern "C" {
 // while a trace is recording. Control calls come from the UI/flow task.
 void probe_trace_init(void);
 void probe_trace_start(int64_t us);
-void probe_trace_brew(int64_t us);
+// Marks the detected pour onset; weights are reported relative to zero_cg from here.
+void probe_trace_brew(int64_t us,int32_t zero_cg);
 void probe_trace_stop(void);
 // Latest scale weight in centigrams (product rounding already applied).
 void probe_trace_weight(bool valid,int32_t weight_cg);
 // Copy of a stopped trace that reached the brew start; NULL if none or out of memory.
 // The caller owns it and releases it with free().
 cw_trace_snapshot_t *probe_trace_snapshot(void);
-typedef struct {bool valid,active,brew_started,truncated;float celsius,ratio;int ntc_mv,ref_mv;unsigned count;} probe_reading_t;
+// seq advances with every 10 Hz reading; us is when it was taken (esp_timer).
+typedef struct {bool valid,active,brew_started,truncated;float celsius,ratio;int ntc_mv,ref_mv;unsigned count,seq;int64_t us;} probe_reading_t;
 // Brew-screen chart columns (see cw_trace_series); also reports elapsed time and axis span.
 size_t probe_trace_chart(size_t columns,int16_t *probe_cc,int32_t *weight_cg,uint32_t *elapsed_ms,uint32_t *span_ms);
 void probe_trace_reading(probe_reading_t *out);

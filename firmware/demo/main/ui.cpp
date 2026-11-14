@@ -54,7 +54,7 @@ static void text(const char *s,int x,int y,int px,uint32_t color=FG,int max_widt
 static void fmt(int x,int y,int px,uint32_t color,const char *format,...) {
     char b[80];va_list a;va_start(a,format);vsnprintf(b,sizeof b,format,a);va_end(a);text(b,x,y,px,color);
 }
-static void time_text(uint32_t ms,int x,int y,int size) {fmt(x,y,size,FG,"%u:%02u",(unsigned)(ms/60000),(unsigned)(ms/1000%60));}
+static void time_text(uint32_t ms,int x,int y,int size,uint32_t color=FG) {fmt(x,y,size,color,"%u:%02u",(unsigned)(ms/60000),(unsigned)(ms/1000%60));}
 static void field(const char *label,const char *value,int x,int y,int size=32,int width=160) {text(label,x,y,design::type::label,MUTED,width);text(value,x,y+34,size,FG,width);}
 static void bottom(const char *label,bool enabled,bool held) {
     c->fillRect(0,design::button_top,c->width(),design::button_height,held&&enabled?ACCENT:BUTTON);c->drawFastHLine(0,design::button_top,c->width(),LINE);
@@ -91,11 +91,12 @@ bool ui_tick(const cw_flow_t &s,const UiState &u,int64_t now) {
     if(page!=previous_page) {previous_page=page;entered_us=now;have_value=false;}
     enter=std::clamp((now-entered_us)/(float)design::motion::enter_us,0.f,1.f);
     enter=1-std::pow(1-enter,3);
-    int32_t value=s.stage==CW_BEVERAGE?-s.live_cg-s.empty_cg:s.live_cg;
+    int32_t value=s.stage==CW_BEVERAGE?s.live_cg-s.empty_cg:s.live_cg;
     if(!have_value||value!=previous_value) {previous_value=value;changed_us=now;have_value=true;}
-    bool numeric=s.stage==CW_EMPTY||s.stage==CW_PREP||s.stage==CW_BREW||s.stage==CW_BEVERAGE;
+    bool numeric=s.stage==CW_EMPTY||s.stage==CW_PREP||s.stage==CW_BEVERAGE;
     value_flash=numeric?1-std::clamp((now-changed_us)/(float)design::motion::value_us,0.f,1.f):0;
     breath=.5f-.5f*std::cos((now%design::motion::breath_us)*6.2831853f/design::motion::breath_us);
+    // Ready breathes and shows the live bed probe.
     bool waiting=!s.interrupted&&s.stage==CW_READY;
     // The brew chart follows the 10 Hz probe trace, independent of scale notifications.
     static int64_t last_chart_us=0;
@@ -133,12 +134,10 @@ bool ui_enabled(const cw_flow_t &s,int action,const UiState *u) {
     if(action==1) {
         if(s.stage==CW_BREWER)return true;
         if(s.stage==CW_EMPTY)return !s.initial_step&&!s.stable.active&&!s.write_pending;
-        // Brewing has no Stop action: the scale ends the brew (dripper removal or its own key).
+        // Brewing has no Stop action: lifting the dripper ends the brew.
         // A brew revisited after Stop keeps a Continue action back to beverage weighing.
-        if(s.stage==CW_BREW)return s.scale.phase==BOOKOO_STOPPED&&s.scale.result_valid&&!s.write_pending&&!s.scale.pending;
+        if(s.stage==CW_BREW)return s.result_valid&&!s.write_pending;
     }
-    if(s.stage==CW_PREP&&action==1&&!s.write_pending&&!s.scale.pending)
-        return s.scale.phase==BOOKOO_IDLE&&s.scale.dose_valid&&s.empty_valid;
     return false;
 }
 int ui_hit(const cw_flow_t &s,int x,int y,const UiState *u) {
@@ -146,31 +145,26 @@ int ui_hit(const cw_flow_t &s,int x,int y,const UiState *u) {
     return y>=design::button_top&&ui_enabled(s,1,u)?1:0;
 }
 // Probe temperature curve since the pour, with the added-water steps behind it.
-// Fixed 60-100 C axis; time axis per cw_trace_span_ms. Brewing shows it live with
-// the current reading; the result page shows the same frozen trace that the
-// Dropbox CSV holds, from the pour to the scale's Stop.
-static void trace_chart(int Y0,int Y1,bool live) {
-    constexpr int X0=88,X1=392,COLUMNS=X1-X0;
+// Fixed 60-100 C axis; time axis per cw_trace_span_ms. Brewing shows a compact live
+// band (no labels); the result page shows the same frozen trace that the Dropbox
+// CSV holds, from the pour to the dripper lift, with axis and time labels.
+// Returns the elapsed brew time of the newest sample.
+static uint32_t trace_chart(int X0,int X1,int Y0,int Y1,bool live) {
+    constexpr int MAX_COLUMNS=304;
     constexpr float TMIN=60,TMAX=100;
-    static int16_t probe[COLUMNS];static int32_t weight[COLUMNS];
+    static int16_t probe[MAX_COLUMNS];static int32_t weight[MAX_COLUMNS];
+    const int columns=std::min(X1-X0,MAX_COLUMNS);X1=X0+columns;
     uint32_t elapsed=0,span=0;
-    size_t n=probe_trace_chart(COLUMNS,probe,weight,&elapsed,&span);
+    size_t n=probe_trace_chart(columns,probe,weight,&elapsed,&span);
+    const bool labels=!live;
     char b[24];
-    if(live) {
-        probe_reading_t now;probe_trace_reading(&now);
-        if(now.valid) {snprintf(b,sizeof b,"%.1f",(double)now.celsius);text(b,284,96,64,FG,0,false,middle_right);}
-        else text("--",284,96,64,MUTED,0,false,middle_right);
-        // The bundled fonts are ASCII only: draw the degree sign as a small ring.
-        c->fillSmoothCircle(292,101,4,MUTED);c->fillSmoothCircle(292,101,2,BG);
-        text("C",298,108,22,MUTED,0,false,middle_left);
-    }
     auto y_of=[&](float celsius){return (int)std::lround(Y1-(Y1-Y0)*(std::clamp(celsius,TMIN,TMAX)-TMIN)/(TMAX-TMIN));};
-    for(int deg=70;deg<=100;deg+=10) {int y=y_of(deg);c->drawFastHLine(X0,y,X1-X0,LINE);fmt(X0-22,y,18,MUTED,"%d",deg);}
+    for(int deg=70;deg<=100;deg+=10) {int y=y_of(deg);c->drawFastHLine(X0,y,X1-X0,LINE);if(labels)fmt(X0-22,y,18,MUTED,"%d",deg);}
     float now_x=X0+(float)(X1-X0)*elapsed/span;
     for(uint32_t t=0;t<=span;t+=60000) {
         int x=X0+(int)std::lround((float)(X1-X0)*t/span);
         c->drawFastVLine(x,Y0,Y1-Y0,LINE);
-        if(!n||std::fabs(x-now_x)>26)fmt(x,Y1+16,18,MUTED,"%u:00",(unsigned)(t/60000));
+        if(labels&&(!n||std::fabs(x-now_x)>26))fmt(x,Y1+16,18,MUTED,"%u:00",(unsigned)(t/60000));
     }
     int32_t scale_cg=30000;
     for(size_t i=0;i<n;i++)if(weight[i]!=CW_TRACE_NO_WEIGHT&&weight[i]/100*115>scale_cg)scale_cg=weight[i]/100*115;
@@ -182,7 +176,7 @@ static void trace_chart(int Y0,int Y1,bool live) {
         if(last_top>=0)c->drawLine(x-1,last_top,x,top,design::water_edge);
         last_top=top;last_x=x;last_weight=w;
     }
-    if(last_weight>=100&&last_x-X0>70) {snprintf(b,sizeof b,"%ld ml",(long)((last_weight+50)/100));text(b,last_x-8,Y1-14,18,MUTED,0,false,middle_right);}
+    if(labels&&last_weight>=100&&last_x-X0>70) {snprintf(b,sizeof b,"%ld ml",(long)((last_weight+50)/100));text(b,last_x-8,Y1-14,18,MUTED,0,false,middle_right);}
     int px=0,py=0;bool have=false;float previous=0;
     auto visit=[&](size_t i) {
         if(probe[i]==CW_TRACE_NO_PROBE) {have=false;return;}
@@ -194,8 +188,22 @@ static void trace_chart(int Y0,int Y1,bool live) {
     // Two-pixel steps keep the antialiased line smooth; the newest column is always drawn.
     for(size_t i=0;i<n;i+=2)visit(i);
     if(n&&(n-1)%2)visit(n-1);
-    if(live&&have&&previous>=TMIN) {c->fillSmoothCircle(px,py,8,BUTTON);c->fillSmoothCircle(px,py,5,ACCENT);}
-    if(n)fmt((int)now_x,Y1+16,18,ACCENT,"%u:%02u",(unsigned)(elapsed/60000),(unsigned)(elapsed/1000%60));
+    if(live&&have&&previous>=TMIN) {c->fillSmoothCircle(px,py,7,BUTTON);c->fillSmoothCircle(px,py,4,ACCENT);}
+    if(labels&&n)fmt((int)now_x,Y1+16,18,ACCENT,"%u:%02u",(unsigned)(elapsed/60000),(unsigned)(elapsed/1000%60));
+    return elapsed;
+}
+// Right-hand metric with a small unit: the value ends at x, the unit follows it.
+static void unit_value(const char *value,const char *unit,int x,int y,uint32_t color=FG) {
+    text(value,x,y,40,color,0,false,middle_right);text(unit,x+7,y+6,22,MUTED,0,false,middle_left);
+}
+// Bed-probe reading as a 40px value; the fonts are ASCII, so the degree sign is a ring.
+static void probe_value(int x,int y) {
+    probe_reading_t now;probe_trace_reading(&now);
+    char b[16];
+    if(!now.valid) {text("--",x,y,40,MUTED,0,false,middle_right);return;}
+    snprintf(b,sizeof b,"%.1f",(double)now.celsius);text(b,x,y,40,FG,0,false,middle_right);
+    c->fillSmoothCircle(x+9,y-10,4,MUTED);c->fillSmoothCircle(x+9,y-10,2,BG);
+    text("C",x+16,y+6,22,MUTED,0,false,middle_left);
 }
 static void highlights(const cw_flow_t &s,int y) {
     text("TDS",150,y,design::type::label,MUTED);text("Extraction",318,y,design::type::label,MUTED);
@@ -257,12 +265,12 @@ void ui_draw(const cw_flow_t &s,const UiState &u) {
         bottom(names[s.brewer],!u.carousel_dir,u.held==1);break;
     case CW_EMPTY:case CW_BEVERAGE: {
         bool empty=s.stage==CW_EMPTY;
-        int32_t weight=empty?s.live_cg:-s.live_cg-s.empty_cg;
+        int32_t weight=empty?s.live_cg:s.live_cg-s.empty_cg;
         const char *caption=empty?(s.initial_step?"Preparing scale":(s.stable.active?"Empty server":"Place empty server")):
-            (s.stable.active?"Beverage weight":"Remove server");
+            (s.stable.active?"Beverage weight":"Keep server on scale");
         if(s.stable.active)stability_bar(s.stable.progress);
         text(caption,234,146,design::type::body,MUTED);
-        if(s.live_valid&&(empty||(s.live_cg<-3000&&weight>0)))fmt(225,236,design::type::hero,number_color(),"%.1f",weight/100.0);
+        if(s.live_valid&&(empty||weight>0))fmt(225,236,design::type::hero,number_color(),"%.1f",weight/100.0);
         else text("--",234,236,design::type::hero,MUTED);
         text("g",360,254,25,MUTED);
         if(empty&&!s.initial_step&&!s.stable.active)bottom("Reset",ui_enabled(s,1),u.held==1);
@@ -271,29 +279,49 @@ void ui_draw(const cw_flow_t &s,const UiState &u) {
     case CW_PREP:
         if(s.live_valid)fmt(225,228,design::type::hero,number_color(),"%.1f",s.live_cg/100.0);else text("--",234,228,design::type::hero,MUTED);
         text("g",360,249,25,MUTED);
-        bottom(s.scale.pending==BOOKOO_CMD_READY?"Starting...":"Start",ui_enabled(s,1),u.held==1);break;
+        // Ready arms itself once the dose is known; without it the brew cannot start.
+        text("Save dose on scale",234,146,design::type::body,MUTED);break;
     case CW_READY:
-        text("Ready",234,226,design::type::ready,mix(FG,ACCENT,150+(unsigned)(breath*105)));break;
+        // Armed by itself: no Start action. Dose and probe confirm the brew can start.
+        text("Pour to start",234,124,design::type::body,MUTED);
+        text("Ready",234,190,design::type::ready,mix(FG,ACCENT,150+(unsigned)(breath*105)));
+        text("Dose",150,266,design::type::label,MUTED);text("Bed",318,266,design::type::label,MUTED);
+        snprintf(b,sizeof b,"%.1f",s.scale.dose_cg/100.0);unit_value(b,"g",170,300);
+        probe_value(336,300);
+        break;
     case CW_BREW: {
-        trace_chart(142,306,true);
-        int32_t water=s.scale.phase==BOOKOO_STOPPED?s.scale.result.water_cg:s.live_cg;
-        if(s.scale.phase==BOOKOO_STOPPED&&s.scale.result_valid)bottom("Continue",ui_enabled(s,1),u.held==1);
-        else if(s.scale.running_dose_valid)fmt(234,362,32,FG,"1:%.1f",(double)water/s.scale.running_dose_cg);
-        else text("1:--",234,362,32,MUTED);
+        // Water leads, ratio and bed temperature follow, the clock uses the free bottom.
+        // Water changes every notification while pouring, so it never value-flashes.
+        bool stopped=s.result_valid;
+        int32_t water=stopped?s.result.water_cg:s.live_cg-s.zero_cg;
+        if(stopped||s.live_valid)fmt(222,124,design::type::hero,FG,"%.1f",water/100.0);else text("--",234,124,design::type::hero,MUTED);
+        text("ml",344,142,design::type::body,MUTED,0,false,middle_left);
+        text("Ratio",150,194,design::type::label,MUTED);text(stopped?"Dose":"Bed",318,194,design::type::label,MUTED);
+        if(s.brew_dose_valid&&s.brew_dose_cg>0)fmt(150,228,40,ACCENT,"1:%.1f",(double)water/s.brew_dose_cg);
+        else text("1:--",150,228,40,MUTED);
+        if(stopped) {
+            snprintf(b,sizeof b,"%.1f",s.result.dose_cg/100.0);unit_value(b,"g",338,228);
+            time_text(s.result.elapsed_ms,234,296,design::type::time,ACCENT);
+            bottom("Continue",ui_enabled(s,1),u.held==1);
+        } else {
+            probe_value(336,228);
+            uint32_t elapsed=trace_chart(88,380,264,334,true);
+            time_text(elapsed,234,396,design::type::time);
+        }
         break;
     }
     case CW_TDS:
-        if(ui_curve_page(s,u)) {trace_chart(118,318,false);break;}
-        snprintf(b,sizeof b,"%.1fg",s.scale.result.dose_cg/100.0);field("Coffee dose",b,151,143,39);
+        if(ui_curve_page(s,u)) {trace_chart(88,392,118,318,false);break;}
+        snprintf(b,sizeof b,"%.1fg",s.result.dose_cg/100.0);field("Coffee dose",b,151,143,39);
         snprintf(b,sizeof b,"1:%.1f",(double)s.ratio);field("Brew ratio",b,317,143,39);
         snprintf(b,sizeof b,"%.1fg",s.beverage_cg/100.0);field("Beverage",b,151,246,39);
-        text("Brew time",317,246,design::type::label,MUTED);time_text(s.scale.result.elapsed_ms,317,280,39);
+        text("Brew time",317,246,design::type::label,MUTED);time_text(s.result.elapsed_ms,317,280,39);
         text("Waiting TDS",234,365,34);
         if(!s.rs_ready)text("RS Disconnected",234,406,20,MUTED);
         else if(s.error[0])text(s.error,234,406,20,MUTED);
         break;
     case CW_REPORT:
-        if(ui_curve_page(s,u)) {trace_chart(118,318,false);break;}
+        if(ui_curve_page(s,u)) {trace_chart(88,392,118,318,false);break;}
         if(u.result_page==1) {
             auto xx=[](float v){return 75+(v-14)*318/12;};
             auto yy=[](float v){return 307-(v-.8f)*226;};
@@ -305,9 +333,9 @@ void ui_draw(const cw_flow_t &s,const UiState &u) {
             int px=xx(std::clamp(s.extraction,14.f,26.f)),py=yy(std::clamp(s.tds,.8f,1.8f));
             c->fillCircle(px,py,8,BUTTON);c->fillCircle(px,py,4,ACCENT);highlights(s,352);break;
         }
-        time_text(s.scale.result.elapsed_ms,234,88,design::type::time);
-        snprintf(b,sizeof b,"%.1fg",s.scale.result.dose_cg/100.0);field("Coffee",b,127,164,32,100);
-        snprintf(b,sizeof b,"%.1fml",s.scale.result.water_cg/100.0);field("Water",b,234,164,32,100);
+        time_text(s.result.elapsed_ms,234,88,design::type::time);
+        snprintf(b,sizeof b,"%.1fg",s.result.dose_cg/100.0);field("Coffee",b,127,164,32,100);
+        snprintf(b,sizeof b,"%.1fml",s.result.water_cg/100.0);field("Water",b,234,164,32,100);
         snprintf(b,sizeof b,"%.1fg",s.beverage_cg/100.0);field("Beverage",b,341,164,32,100);
         snprintf(b,sizeof b,"1:%.1f",(double)s.ratio);field("Ratio",b,155,260,34);
         snprintf(b,sizeof b,"%.2fg/g",(double)s.retention);field("Retention",b,313,260,32);

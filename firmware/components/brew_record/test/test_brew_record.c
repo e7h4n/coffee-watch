@@ -8,8 +8,8 @@ int main(void) {
     cw_record_tracker_t t;cw_record_init(&t,"device-session");cw_flow_t f={0};cw_brew_record_t draft,final,again;
     f.stage=CW_BREW;assert(!cw_record_event(&t,CW_READY,&f,100,NULL));
     f.stage=CW_BEVERAGE;assert(!cw_record_event(&t,CW_BREW,&f,100,NULL));
-    f.stage=CW_TDS;f.beverage_valid=true;f.scale.result_valid=true;f.scale.result.dose_valid=true;f.scale.result.water_valid=true;
-    f.scale.result.dose_cg=1504;f.scale.result.water_cg=22504;f.beverage_cg=19645;f.empty_cg=29804;f.scale.result.elapsed_ms=180000;f.brewer=1;
+    f.stage=CW_TDS;f.beverage_valid=true;f.result_valid=true;f.result.dose_valid=true;f.result.water_valid=true;
+    f.result.dose_cg=1504;f.result.water_cg=22504;f.beverage_cg=19645;f.empty_cg=29804;f.result.elapsed_ms=180000;f.brewer=1;
     assert(cw_record_event(&t,CW_BEVERAGE,&f,200,&draft));assert(!draft.complete&&draft.revision==1&&draft.beverage_cg==19650);
     assert(!cw_record_event(&t,CW_TDS,&f,300,&again));
     char json[1536];assert(cw_record_json(&draft,"2026-11-02T08:00:00Z",json,sizeof json)>0);

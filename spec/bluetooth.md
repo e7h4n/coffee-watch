@@ -1,6 +1,6 @@
 # Bluetooth interfaces
 
-Supported baseline: BOOKOO Themis Ultra 4.0.1, Ratio + Auto; DiFluid RS v002-005.
+Supported baseline: BOOKOO Themis Ultra 4.0.1 in Ratio mode; DiFluid RS v002-005.
 Transport is NimBLE central with two connections. The demo targets the two known
 peer addresses configured in transport.c; it has no device-picker UI.
 
@@ -13,28 +13,28 @@ Notifications are 20 bytes with XOR validation. Standard 16-bit Bluetooth UUIDs.
 | Action | Command | Confirmation |
 | --- | --- | --- |
 | Stored dose query, once after subscription | `03 0A 14 00 00 1D` | `03 10`, unsigned BE24 centigrams at offsets 6..8 |
-| Enter Auto Ready | `03 0A 18 00 00 11` | `03 0D`, state 02 |
-| Exit Ready | `03 0A 18 01 00 10` | `03 0D`, state 03 |
-| Stop | opcode 05, params zero | `03 0D`, state 00 |
-| Tare in idle | opcode 01, params zero | Dispatch only; no independent completion event |
-| Exit Done and tare | opcode 07, params zero | State 04 exits Done; not a synthetic tare ACK |
+| Exit Ready (brewer confirmation, Auto submode only) | `03 0A 18 01 00 10` | Dispatch only |
+| Exit Done (brewer confirmation, Auto submode only) | opcode 07, params zero | Dispatch only |
+| Tare (brewer confirmation, Reset) | opcode 01, params zero | Dispatch only; no independent completion event |
 
 `03 0F` reports dose changes (ASCII sign, BE24 centigrams). `03 0B` reports live
-weight. Auto states: 02 Ready, 01 Start, 00 Stop, 03 Exit Ready, 04 Exit Done.
-Ready/Start can carry old elapsed time; do not treat it as a new timer result.
-Freeze Stop's water/time independently of the ordinary weight stream.
+weight; it is the only measurement the brew uses. Start, zero, water, brew time
+and beverage come from the watch's own pour and lift detection (see product.md),
+not from the scale's Auto submode. The watch never sends Enter Auto Ready
+(`03 0A 18 00 00 11`) or a timer command.
 
-In Auto Done, the live stream is zero with the server present and negative gross
-mass after removal, even while the scale display retains its result. Use that
-negative gross mass minus the previously captured empty-server mass for beverage.
+Auto events `03 0D` (02 Ready, 01 Start, 00 Stop, 03 Exit Ready, 04 Exit Done) are
+not brew evidence. Entering Auto Ready or Done re-tares the scale on its own, so
+any Auto event after brewer confirmation, while a brew is prepared or measured,
+interrupts it. During brewer confirmation, 03 and 04 may follow the exits.
 
 The session adapter keeps a scale-reported dose cache only within the current
-connection. Start/result dose snapshots are independent. ATT write success does
-not confirm Ready, Start or Stop. Each action has one request and one exact event.
+connection. The pour start takes its own dose snapshot. ATT write success never
+confirms a scale action.
 
 Interface references: [official Ultra protocol](https://github.com/BooKooCode/OpenSource/blob/main/bookoo_ultra_scale/protocols.md)
 and [official BOOKOO client](https://bookoocoffee.com/pages/app-download), BOOKOO N
-3.8.2 for stored feature query and Auto Ready commands.
+3.8.2 for the stored feature query and the Exit Ready command.
 
 ## DiFluid RS
 
@@ -62,6 +62,7 @@ packet fixtures; no APK or decompiled client source is included.
 Command `03 0A 0F 00 00 06` returns a 20-byte XOR-validated `03 0E` snapshot.
 For the validated 4.0.1 unit: offset 2 is current mode (2 = Ratio), offset 5 is
 Ratio submode (2 = Auto). This snapshot does not expose the current Auto phase.
-Selection initialization therefore validates this mode, then uses a fixed
-Exit Ready / Exit Done / tare dispatch sequence, rather than inferring Done
-from the mode snapshot or a zero/negative live weight.
+Brewer confirmation therefore requires Ratio, and in the Auto submode uses a
+fixed Exit Ready / Exit Done dispatch before the tare, rather than inferring
+Done from the mode snapshot or a zero/negative live weight. The manual submode
+value has not been observed on hardware; any non-Auto Ratio submode tares only.

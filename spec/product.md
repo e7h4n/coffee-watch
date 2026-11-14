@@ -2,9 +2,10 @@
 
 ## Hardware and flow
 
-M5Stack StopWatch (468×466 framebuffer), BOOKOO Themis Ultra 4.0.1 in Ratio +
-Auto mode, and DiFluid RS v002-005. Brewers: V60, Switch, AeroPress and Hoop.
-The complete brewing assembly sits on the scale while pouring.
+M5Stack StopWatch (468×466 framebuffer), BOOKOO Themis Ultra 4.0.1 in Ratio
+mode (manual or Auto submode; the watch never arms Auto), the bed probe, and
+DiFluid RS v002-005. Brewers: V60, Switch, AeroPress and Hoop. The complete
+brewing assembly sits on the scale while pouring.
 
 1. Connect the scale and select a brewer. RS is not needed yet.
 2. Place an empty server. Capture weight >10g stable within 0.2g for 5 seconds.
@@ -12,23 +13,32 @@ The complete brewing assembly sits on the scale while pouring.
 3. Prepare the brewing assembly. Dose is saved on the scale during bean weighing,
    possibly before watch startup. Read its stored dose at connection; no dose
    selection or resaving during preparation.
-4. The single Start button requests Auto Ready. Show Ready only after its exact
-   device event. Pouring produces the real Start event and enters brewing.
-5. Show the live bed-probe temperature with its curve since the pour, the added
-   water as steps behind it, elapsed time on the curve and the ratio. There is no
-   Stop action on the watch while brewing: the scale ends the brew (dripper
-   removal in Auto, or the scale's own key), freezing dose, water and time from
-   device events. Back still requests Stop. A brew revisited after Stop shows
-   Continue back to beverage weighing.
-6. Show Remove server. BOOKOO Auto Done reports zero while the full server stays
-   on the scale; removing it produces negative gross server mass. Beverage mass
-   equals -live weight - saved empty-server mass. Require weight < -30.0g,
-   positive beverage and <=0.2g variation for 1 second. No final Reset.
-   Once beverage mass is frozen, the brewer-confirmation scale sequence (mode
-   query, Exit Ready, Exit Done, tare) runs once more so the scale is back in
-   its idle, tared state while the result stays on the watch. A mismatched mode
-   or write failure only abandons that pass. After it starts, Back from Waiting
-   TDS returns Home because the server can no longer be re-weighed.
+4. There is no Start button. Once the empty server and the stored dose are known,
+   preparation arms the watch's own pour detection by itself and shows Ready;
+   without a dose it shows Save dose on scale and never arms. Nothing is sent to
+   the scale. Arming restarts the temperature baseline, so earlier probe rises (a
+   rinse, a warm hand) never count. The brew starts when the bed probe reads at least 3.0 °C above the median
+   of its previous 3 seconds and, within 1.5 seconds, the weight is at least 0.5g
+   above the zero. The zero is the median of the latest plateau (at least 1 second,
+   within 0.2g, no gap over 1 second) inside the 5 seconds before the probe
+   trigger, so water already poured is counted. Brew time starts at the first
+   weight 0.3g above that zero. A pour without such a plateau is an explicit
+   interruption, never a guessed zero. Missing probe readings sit below the
+   ~25 °C ADC floor, so a mostly-missing window uses 25 °C as its baseline.
+5. The scale's own display is gross weight now, so the watch shows the brew: added
+   water (live weight minus the zero) largest, then the ratio and the live
+   bed-probe temperature, a compact temperature curve with the water steps behind
+   it, and the brew time at the bottom. There is no Stop action on the watch while brewing: lifting the
+   dripper ends the brew. The brew ends when a settled level (1 second within
+   0.2g) is followed by a new settled level at least 30.0g lower. Water is the
+   last settled level before the lift minus the zero; brew time ends with that
+   level. Stirring, valve spikes and presses never settle, so they never end it.
+   Back discards a live brew (for example a false start from rinsing the paper
+   with the probe in the dripper) and Ready re-arms at once. A brew revisited
+   after the lift shows Continue back to beverage weighing.
+6. The server stays on the scale after the lift. Beverage mass equals live weight
+   minus the saved empty-server mass. Require positive beverage and <=0.2g
+   variation for 1 second. No Reset and no server removal are needed.
 7. Connect RS and accept a new normal measurement. Show numerical report and
    Golden Cup chart, using the same result.
 8. Result pages: Waiting TDS shows its summary and the brew curve; the report
@@ -58,14 +68,15 @@ No assumed retention, default dose, manual TDS or offline measurement path.
 
 ## Events and continuity
 
-Business transitions follow validated notifications from the active connection.
+Business transitions follow validated notifications from the active connection
+and the bed probe.
 Weight stability is evaluated only on weight notifications; gaps >1 second reset
 continuity. UI rendering and elapsed timers cannot complete an operation. There
 are no command retries, polling completion checks or fallback measurements.
 Disconnect interrupts active brewing. Explicit Home begins a new session;
 reconnection alone never resumes it. New connections invalidate the dose cache.
 Home/navigation within the same connection preserve scale-reported stored dose.
-Start freezes its own dose snapshot; later dose changes cannot alter a result.
+The pour start freezes its own dose snapshot; later dose changes cannot alter a result.
 Only a fresh, valid RS result after entering Waiting TDS creates a report.
 
 ## Input and appearance
@@ -77,8 +88,8 @@ through Home).
 Select activates the visible enabled bottom action; Next has no preparation
 action. Press highlights, release executes, and dragging outside cancels.
 Hold Next 650ms for Back; hold both keys 900ms for Home, consuming short actions.
-Back during brewing requests Stop and waits for the exact event. Back from Ready
-requests Exit Ready and waits for its event. Result pages turn by swipe or short Next.
+Back during brewing discards the brew and re-arms Ready; Back from Ready returns to
+empty-server capture. Neither sends a scale command. Result pages turn by swipe or short Next.
 
 ## Idle shutdown
 
@@ -98,15 +109,19 @@ requires the scale; if it is off, Back returns Home for an explicit new session.
 ## Brewer selection initializes the scale
 
 Confirming a brewer displays Preparing scale and blocks empty-server capture.
-A single mode query (0F -> 0E) must report Ratio (byte 2 = 2) and its Auto submode
-(byte 5 = 2). Unsupported configuration is an explicit interruption. Then a fixed
-single-pass sequence dispatches Exit Ready (18/01), Exit Done (07), and tare (01),
-in this order. Each write is sent once, serialized by its ATT result; there is no
-retry or alternate sequence. Exit Ready prevents 07 from starting a Ready scale;
-in Auto Idle, 07 is a documented no-op. Done exit is event 04 when applicable.
-ATT success is dispatch status, never a tare-completed assertion. Only subsequent
-actual weight notifications can complete the independent 5-second empty-server
-capture rule. Mode query or write failure cannot advance capture.
+A single mode query (0F -> 0E) must report Ratio (byte 2 = 2), the mode that holds
+the stored dose. Any other mode is an explicit interruption. If the Ratio submode
+is Auto (byte 5 = 2), a fixed single-pass sequence dispatches Exit Ready (18/01)
+and Exit Done (07) first, so a scale left in Ready or Done returns to Idle. Tare
+(01) follows in every case. Each write is sent once, serialized by its ATT result;
+there is no retry or alternate sequence. ATT success is dispatch status, never a
+tare-completed assertion. Only subsequent actual weight notifications can complete
+the independent 5-second empty-server capture rule. Mode query or write failure
+cannot advance capture.
+
+The watch never arms the scale's Auto submode. An Auto event (03 0D) during
+preparation, Ready, brewing or beverage weighing means the scale re-tared itself,
+which would move the zero under the brew, so it is an explicit interruption.
 
 ## Wi-Fi settings
 

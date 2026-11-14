@@ -47,18 +47,18 @@ static void turn_page(int dir,int64_t now) {
     if(n<2||ui.wifi_setup)return;
     ui.result_page=(ui.result_page+dir+n)%n;ui.page_us=now;render_needed=true;
 }
-// Brew trace: record from Start (Ready) through brewing; stop when the brew stops.
+// Brew trace: record from Ready through brewing; stop when the brew stops.
+// The brew mark is the detected pour onset, which precedes the trigger slightly.
 static cw_stage_t trace_stage=CW_HOME;
 static void trace_follow(int64_t us) {
     if(flow.stage==trace_stage)return;
     if(flow.stage==CW_READY)probe_trace_start(us);
-    else if(flow.stage==CW_BREW&&trace_stage==CW_READY)probe_trace_brew(us);
+    else if(flow.stage==CW_BREW&&trace_stage==CW_READY)probe_trace_brew(flow.onset_us,flow.zero_cg);
     else if(flow.stage!=CW_BREW)probe_trace_stop();
     trace_stage=flow.stage;
 }
 static void go_home() {
     if(ui.wifi_setup)wifi_setup_close();
-    if(flow.stage==CW_READY) {uint8_t b[6];if(cw_exit_ready_request(&flow,b))transport_write(b,flow.generation);}
     cw_home(&flow);transport_drop_rs();rs_requested=false;rs_epoch=0;
     if(!flow.scale_ready)transport_find_scale();
     ui={};queue_read=queue_write=0;render_needed=true;
@@ -73,24 +73,17 @@ static void action(int which) {
     if(!ui_enabled(flow,which,&ui)||ui.carousel_dir)return;
     if(ui.wifi_setup) {wifi_setup_close();ui.wifi_setup=false;ui.held=0;render_needed=true;return;}
     if(which==1&&(flow.stage==CW_HOME||(!flow.scale_ready&&flow.stage==CW_BREWER))) {ui.wifi_setup=true;ui.held=0;wifi_setup_open();render_needed=true;return;}
-    if(which==1&&flow.stage==CW_BREW&&flow.scale.phase==BOOKOO_STOPPED) {cw_revisit_stopped(&flow);return;}
+    if(which==1&&flow.stage==CW_BREW&&flow.result_valid) {cw_revisit_stopped(&flow);return;}
     if(which==1&&flow.stage==CW_BREWER) {cw_choose(&flow,flow.brewer);if(flow.stage==CW_EMPTY)save_brewer(flow.brewer);return;}
-    if(which==1&&flow.stage==CW_PREP) {
-        uint8_t b[6];if(cw_ready_request(&flow,b))transport_write(b,flow.generation);
-        return;
-    }
+    // There is no Start: preparation arms pour detection by itself.
     if(which==1&&flow.stage==CW_EMPTY) {
         uint8_t b[6];if(cw_reset_dispatch(&flow,b)) {transport_write(b,flow.generation);ESP_LOGI("flow","Reset dispatched; no action-completed inference");}
     }
-    // No Stop action while brewing: the scale ends the brew. Back still requests Stop.
+    // No Stop action while brewing: lifting the dripper ends the brew.
 }
 static void back() {
     if(ui.wifi_setup) {wifi_setup_close();ui.wifi_setup=false;ui.held=0;render_needed=true;return;}
     cw_back(&flow);
-    if(flow.back_pending&&!flow.scale.pending&&!flow.write_pending) {
-        uint8_t b[6];bool dispatch=flow.stage==CW_READY?cw_exit_ready_request(&flow,b):cw_timer_request(&flow,BOOKOO_CMD_STOP,b);
-        if(dispatch)transport_write(b,flow.generation);
-    }
     transport_drop_rs();rs_requested=false;rs_epoch=0;if(!flow.scale_ready)transport_find_scale();
     ui={};queue_read=queue_write=0;render_needed=true;
 }
@@ -185,7 +178,7 @@ static void receive(const demo_event_t &e) {
     if(before!=flow.stage) {
         ui.held=0;ui.result_page=0;ui.page_us=e.us;
         ESP_LOGI("flow","stage=%u generation=%u brew=%u dose_valid=%u empty=%ld beverage=%ld",flow.stage,flow.generation,flow.scale.brew_id,flow.scale.dose_valid,(long)flow.empty_cg,(long)flow.beverage_cg);
-        if(flow.stage==CW_REPORT)ESP_LOGI("flow","REPORT dose=%.1f water=%.1f beverage=%.1f time_ms=%u tds=%.8f extraction=%.8f",flow.scale.result.dose_cg/100.,flow.scale.result.water_cg/100.,flow.beverage_cg/100.,(unsigned)flow.scale.result.elapsed_ms,(double)flow.tds,(double)flow.extraction);
+        if(flow.stage==CW_REPORT)ESP_LOGI("flow","REPORT dose=%.1f water=%.1f beverage=%.1f time_ms=%u tds=%.8f extraction=%.8f",flow.result.dose_cg/100.,flow.result.water_cg/100.,flow.beverage_cg/100.,(unsigned)flow.result.elapsed_ms,(double)flow.tds,(double)flow.extraction);
     }
     render_needed=true;
 }
@@ -212,8 +205,22 @@ extern "C" void app_main() {
     unsigned last_generation=flow.generation;
     auto last_phase=flow.scale.phase;
     bool last_scale=flow.scale_ready,last_rs=flow.rs_ready,last_interrupted=flow.interrupted;
+    unsigned probe_seq=0;
     for(;;) {
         demo_event_t e;unsigned n=0;while(n++<32&&xQueueReceive(events,&e,0)==pdTRUE)receive(e);
+        // Each new 10 Hz bed-probe reading feeds pour detection once.
+        probe_reading_t probe;probe_trace_reading(&probe);
+        if(probe.seq!=probe_seq) {
+            probe_seq=probe.seq;cw_stage_t before=flow.stage;bool was_interrupted=flow.interrupted;
+            cw_probe_message(&flow,probe.valid,probe.celsius,probe.us);
+            if(flow.stage!=before) {
+                // Ready -> Brew allocates the record identity, as for scale-driven transitions.
+                cw_brew_record_t unused;cw_record_event(&records,before,&flow,probe.us,&unused);
+                trace_follow(probe.us);ui.held=0;ui.result_page=0;ui.page_us=probe.us;
+                ESP_LOGI("flow","stage=%u generation=%u zero=%ld onset=%lld",flow.stage,flow.generation,(long)flow.zero_cg,(long long)flow.onset_us);
+            }
+            if(flow.stage!=before||flow.interrupted!=was_interrupted)render_needed=true;
+        }
         int64_t now=now_us();
         BoardInput raw=board_input();
         if(raw.next||raw.select||(raw.touch_valid&&raw.touch))last_activity=now;
