@@ -1,8 +1,7 @@
 # Roast color mode
 
-When the RoastWatch adapter with a roast-color sensor is on the StopWatch at
-power-on, the watch is a roast colorimeter instead of the brew assistant. Without
-the sensor it boots into the brew assistant exactly as before.
+With the RoastWatch adapter and its roast-color sensor on the StopWatch, the watch
+is a roast colorimeter; with a scale it is the brew assistant. Home chooses.
 
 ## Hardware
 
@@ -16,20 +15,27 @@ The sensor looks down through an 11 mm aperture and the glass, 3.4 mm above the
 sample. The housing and cup must be printed opaque; pressure on the housing changes
 the reading.
 
-## Boot selection
+## Home selection
 
-After the board starts, the watch opens I2C controller 1 on G5/G6 (400 kHz,
-internal pull-ups in addition to the sensor board's) and probes address 0x57 up to
-three times, 20 ms apart. A part ID of 0x15 selects roast color mode. Otherwise
-the bus is deleted, G5/G6 return to their reset state and the brew assistant
-starts. The choice holds until the next power-on; plugging the sensor in later
-does nothing.
+Home is the page with **Connect scale or color sensor**, the Brew and Roast color
+tiles and Wi-Fi setup. Boot starts there, and holding both keys for 900 ms returns
+there from any page. On Home the watch keeps searching for the scale and polls G5/G6
+twice a second (I2C controller 1, 400 kHz, internal pull-ups in addition to the
+sensor board's) for a MAX30101 with part ID 0x15:
 
-Roast color mode joins the saved Wi-Fi network once and uploads to the saved
-Dropbox app folder, exactly as the brew assistant does. It does not start the scale
-or RS connections or Bluetooth setup: configure Wi-Fi and Dropbox in the brew
-assistant (boot without the sensor); both modes share the stored settings. The
-battery widget, the 10-minute idle power-off and the serial console remain.
+- A **new** connection on Home enters its product, the first one winning: the color
+  sensor appearing (also at power-on) enters roast color, the scale link coming up
+  enters the brew assistant.
+- A device that is still connected when Home is entered (for example after holding
+  both keys) does not re-enter by itself; its tile is lit and a tap opens it.
+- Wi-Fi setup suspends automatic entry; the tiles still show what is connected.
+- Removing the sensor while measuring (a second of failed reads, or 3 s without a
+  sample) returns Home; attaching it again re-enters roast color.
+
+Wi-Fi, Dropbox and Bluetooth start at boot and serve both products. The scale may
+stay connected in the background while measuring color; it is offered on Home.
+Leaving roast color shuts the sensor down (LED off); entering it restarts the 60 s
+warm-up.
 
 ## Sensor configuration
 
@@ -46,7 +52,7 @@ community calibration applies:
 
 ## Measuring
 
-1. **Warm-up.** The first 60 s after power-on count down, as on the Roast Meter.
+1. **Warm-up.** The first 60 s after entering roast color count down, as on the Roast Meter.
    Nothing is recorded and calibration is unavailable.
 2. **Loaded.** IR at or above 30000 means something is on the glass (the Roast
    Meter's level); below 28000 it is lifted. The gap keeps the state from
@@ -63,7 +69,7 @@ community calibration applies:
 6. **Saturation.** A reading at or above 260000 (the 18-bit ceiling) shows Too
    bright and records nothing; recalibrate on baking soda.
 
-Back (Next held 650 ms) or holding both keys 900 ms clears the current group.
+Back (Next held 650 ms) clears the current group; holding both keys 900 ms goes Home.
 
 ## Calibration
 
@@ -126,6 +132,7 @@ so far:
 | `stream` | Toggles one `IR t_ms=… raw=… led=…` line per sample, for setting thresholds |
 | `calibrate` / `select` | Bottom action |
 | `back` | Back |
+| `home`, `mode`, `open brew`, `open color` | Home, the current product, a Home tile |
 | `screen` | Framebuffer dump, as in the brew assistant |
 
 Every reading logs `READING n/3 index=… raw=… led=…` and every group logs

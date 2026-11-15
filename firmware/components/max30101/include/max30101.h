@@ -39,6 +39,8 @@ bool max30101_identify(const max30101_bus_t *bus);
 // rollover, SpO2 mode, 16384 nA range, 50 samples/s, 411 us pulses; red, green and
 // pilot LEDs off, IR at ir_pa. Clears the FIFO.
 bool max30101_configure(const max30101_bus_t *bus,uint8_t ir_pa);
+// Power-save shutdown: LEDs off, no conversions, registers kept.
+bool max30101_shutdown(const max30101_bus_t *bus);
 // Changes the IR amplitude and clears the FIFO, so later samples use it.
 bool max30101_set_ir(const max30101_bus_t *bus,uint8_t ir_pa);
 // Reads up to max samples of IR (oldest first). Returns the count, or -1 on a bus error.

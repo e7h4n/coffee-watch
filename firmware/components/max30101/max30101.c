@@ -25,6 +25,7 @@ bool max30101_configure(const max30101_bus_t *bus,uint8_t ir_pa) {
     for(size_t i=0;i<sizeof setup/sizeof setup[0];i++)if(!bus->write(bus->ctx,setup[i][0],setup[i][1]))return false;
     return max30101_set_ir(bus,ir_pa);
 }
+bool max30101_shutdown(const max30101_bus_t *bus) {return bus->write(bus->ctx,MAX30101_REG_MODE,0x80|0x03);}
 bool max30101_set_ir(const max30101_bus_t *bus,uint8_t ir_pa) {
     return bus->write(bus->ctx,MAX30101_REG_LED_IR,ir_pa)&&clear_fifo(bus);
 }

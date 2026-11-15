@@ -87,7 +87,7 @@ int ui_result_pages(const cw_flow_t &s) {
 }
 bool ui_curve_page(const cw_flow_t &s,const UiState &u) {return (s.stage==CW_TDS&&u.result_page==1)||(s.stage==CW_REPORT&&u.result_page==2);}
 bool ui_tick(const cw_flow_t &s,const UiState &u,int64_t now) {
-    int page=s.interrupted?100:(!s.scale_ready&&s.stage!=CW_TDS&&s.stage!=CW_REPORT?101:(int)s.stage*4+u.result_page);
+    int page=u.home?102:s.interrupted?100:(!s.scale_ready&&s.stage!=CW_TDS&&s.stage!=CW_REPORT?101:(int)s.stage*4+u.result_page);
     if(page!=previous_page) {previous_page=page;entered_us=now;have_value=false;}
     enter=std::clamp((now-entered_us)/(float)design::motion::enter_us,0.f,1.f);
     enter=1-std::pow(1-enter,3);
@@ -129,6 +129,7 @@ static void stability_bar(float progress) {
     }
 }
 bool ui_enabled(const cw_flow_t &s,int action,const UiState *u) {
+    if(u&&u->home&&!u->wifi_setup)return action==UI_HOME_WIFI||(action==UI_HOME_BREW&&u->home_scale)||(action==UI_HOME_COLOR&&u->home_color);
     if((u&&u->wifi_setup)||s.stage==CW_HOME||(!s.scale_ready&&s.stage==CW_BREWER))return action==1;
     if(s.interrupted||!s.scale_ready)return false;
     if(action==1) {
@@ -142,6 +143,10 @@ bool ui_enabled(const cw_flow_t &s,int action,const UiState *u) {
 }
 int ui_hit(const cw_flow_t &s,int x,int y,const UiState *u) {
     if((x-234)*(x-234)+(y-233)*(y-233)>233*233)return 0;
+    if(u&&u->home&&!u->wifi_setup) {
+        int hit=y>=design::button_top?UI_HOME_WIFI:(x>=74&&x<394&&y>=160&&y<232)?UI_HOME_BREW:(x>=74&&x<394&&y>=248&&y<320)?UI_HOME_COLOR:0;
+        return hit&&ui_enabled(s,hit,u)?hit:0;
+    }
     return y>=design::button_top&&ui_enabled(s,1,u)?1:0;
 }
 // Probe temperature curve since the pour, with the added-water steps behind it.
@@ -245,6 +250,22 @@ void ui_draw(const cw_flow_t &s,const UiState &u) {
             text(dropbox,234,354,18,MUTED);
         }
         bottom("Close",true,u.held==1);return;
+    }
+    if(u.home) {
+        // Home: the first device to connect picks the product; a connected one is also a choice.
+        text("Connect scale or color sensor",234,118,design::type::body,MUTED);
+        struct Tile {const char *label,*on,*off;bool enabled;int action,top;};
+        const Tile tiles[]={{"Brew","Scale connected","Searching for scale",u.home_scale,UI_HOME_BREW,160},
+                            {"Roast color","Color sensor attached","No color sensor",u.home_color,UI_HOME_COLOR,248}};
+        for(const Tile &t:tiles) {
+            bool held=t.enabled&&u.held==t.action;
+            if(t.enabled)c->fillSmoothRoundRect(74,t.top,320,72,18,held?ACCENT:BUTTON);
+            else c->drawRoundRect(74,t.top,320,72,18,LINE);
+            text(t.label,234,t.top+28,32,held?BG:(t.enabled?ACCENT:MUTED));
+            text(t.enabled?t.on:t.off,234,t.top+56,18,held?BG:MUTED);
+        }
+        if(s.error[0]&&!u.home_scale)text(s.error,234,338,16,MUTED);
+        bottom("Wi-Fi setup",true,u.held==UI_HOME_WIFI);return;
     }
     if(s.interrupted) {
         text("Brew interrupted",234,174,36);text(s.error[0]?s.error:"Scale disconnected",234,224,20,MUTED);

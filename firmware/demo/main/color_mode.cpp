@@ -2,16 +2,9 @@
 #include "color_mode.h"
 #include "color_sensor.h"
 #include "roast_color.h"
-#include "ui.h"
 #include "design.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "esp_timer.h"
 #include "esp_log.h"
 #include "nvs.h"
-#include "esp_mac.h"
-#include "esp_random.h"
-#include "wifi_setup.h"
 #include "dropbox_setup.h"
 #include <cstdio>
 #include <cstring>
@@ -24,14 +17,12 @@ static bool calibrated;
 static float soda;
 static int64_t start_us,last_sample_us;
 static ColorView view;
-static UiState ui;
+static UiState *held_ui;
 // Dropbox: one record per group, named <session>-<sequence> like brew records.
 static char session[40],group_id[64];
 static unsigned group_sequence;
 static cw_record_status_t upload_state;
 static bool upload_known;
-static int64_t network_activity_us;
-static int64_t now_us() {return esp_timer_get_time();}
 // The calibrated IR amplitude and its baking-soda reading survive reboots.
 static void load_settings() {
     nvs_handle_t h;uint8_t level=0;uint16_t soda_x10=0;
@@ -109,10 +100,6 @@ static void upload_group() {
     upload_state={};upload_state.state=CW_RECORD_SAVING;upload_state.revision=record.revision;snprintf(upload_state.id,sizeof upload_state.id,"%s",group_id);upload_known=true;
     dropbox_setup_color(&record);
 }
-static void receive(const demo_event_t &e) {
-    if(e.kind==DE_WIFI)network_activity_us=e.us;
-    else if(e.kind==DE_RECORD&&!strcmp(e.data.record.id,group_id)&&e.data.record.revision>=upload_state.revision) {upload_state=e.data.record;upload_known=true;network_activity_us=e.us;}
-}
 static void log_events(unsigned events) {
     if(events&RC_EV_READING)ESP_LOGI(TAG,"READING %u/3 index=%.1f raw=%lu led=%u",meter.count,(double)meter.readings[meter.count-1],(unsigned long)meter.raw,pa);
     if(events&RC_EV_RESULT)ESP_LOGI(TAG,"RESULT mean=%.1f sd=%.2f readings=%.1f,%.1f,%.1f led=%u soda=%.1f retest=%u",(double)meter.mean,(double)meter.sd,
@@ -143,8 +130,9 @@ struct Keys {
 };
 static Keys keys;
 // Same gestures as the brew assistant: release executes, dragging out or a page
-// change cancels, Next held 650 ms is Back, both keys held 900 ms as well.
-static void input_tick(BoardInput raw,int64_t now) {
+// change cancels, Next held 650 ms is Back, both keys held 900 ms request Home.
+static bool input_tick(BoardInput raw,int64_t now) {
+    bool home=false;
     if(!raw.touch_valid) {keys.touch_cancel=true;raw.touch=false;}
     bool prev_next=keys.next,prev_select=keys.select;
     if(raw.next!=keys.next_raw) {keys.next_raw=raw.next;keys.next_change=now;}
@@ -156,7 +144,7 @@ static void input_tick(BoardInput raw,int64_t now) {
     if(keys.next&&keys.select&&!keys.chord) {keys.chord=true;keys.chord_start=now;keys.next_consumed=keys.select_consumed=true;}
     if(keys.select&&keys.select_page!=view.page)keys.select_consumed=true;
     if(keys.chord) {
-        if(keys.chord_start&&keys.next&&keys.select&&now-keys.chord_start>=900000) {back();keys.chord_start=0;}
+        if(keys.chord_start&&keys.next&&keys.select&&now-keys.chord_start>=900000) {home=true;keys.chord_start=0;}
         if(!keys.next&&!keys.select)keys.chord=false;
     } else {
         if(keys.next&&!keys.next_consumed&&now-keys.next_start>=650000) {keys.next_consumed=keys.select_consumed=true;back();}
@@ -167,61 +155,49 @@ static void input_tick(BoardInput raw,int64_t now) {
     if(!raw.touch&&keys.touch&&keys.touch_action&&!keys.touch_cancel)action();
     keys.touch=raw.touch;
     bool enabled;ui_color_action(view,&enabled);
-    ui.held=enabled&&!keys.chord&&((keys.select&&!keys.select_consumed)||(keys.touch&&keys.touch_action&&!keys.touch_cancel))?1:0;
+    held_ui->held=enabled&&!keys.chord&&((keys.select&&!keys.select_consumed)||(keys.touch&&keys.touch_action&&!keys.touch_cancel))?1:0;
+    return home;
 }
 static void print_status(int64_t now) {
     printf("COLOR page=%d raw=%lu index=%.1f loaded=%u count=%u mean=%.1f sd=%.2f led=%u calibrated=%u soda=%.1f warmup_ms=%lu errors=%u last_sample_ms=%lld\n",
         (int)view.page,(unsigned long)meter.raw,(double)rc_index((float)meter.raw),meter.loaded,meter.count,(double)meter.mean,(double)meter.sd,pa,calibrated,(double)soda,
         (unsigned long)view.warmup_ms,color_sensor_errors(),(long long)((now-last_sample_us)/1000));
 }
-void color_mode_run(bool (*read_command)(char *line,size_t size),bool (*read_event)(demo_event_t *event)) {
+void color_mode_init(const char *id_session) {snprintf(session,sizeof session,"%s",id_session);}
+void color_mode_enter(int64_t now) {
     load_settings();
-    uint8_t mac[6];esp_read_mac(mac,ESP_MAC_WIFI_STA);
-    snprintf(session,sizeof session,"%02x%02x%02x%02x%02x%02x-%08lx%08lx",mac[0],mac[1],mac[2],mac[3],mac[4],mac[5],(unsigned long)esp_random(),(unsigned long)esp_random());
-    // Joins the saved network once and starts the Dropbox worker with its saved authorization.
-    wifi_setup_init();
-    start_us=last_sample_us=now_us();
-    color_sensor_start(pa);rc_meter_init(&meter,start_us);
+    start_us=last_sample_us=now;calibrating=false;keys=Keys();view=ColorView();group_id[0]=0;upload_known=false;
+    rc_meter_init(&meter,start_us);color_sensor_start(pa);
     ESP_LOGI(TAG,"roast color mode: LED %u, %s",pa,calibrated?"calibrated":"not calibrated");
     if(calibrated)ESP_LOGI(TAG,"baking soda %.1f",(double)soda);
-    ui.battery_percent=board_battery_percent();
-    int64_t last_draw=0,last_activity=start_us,last_battery=start_us;
-    ColorPage last_page=view.page;
-    constexpr int64_t idle_limit_us=10LL*60*1000000;
-    for(;;) {
-        color_sample_t s;unsigned n=0;
-        while(n++<16&&color_sensor_next(&s)) {
-            unsigned count=meter.count;bool loaded=meter.loaded;rc_cal_phase_t phase=cal.phase;
-            feed(s);
-            if(meter.count!=count||meter.loaded!=loaded||cal.phase!=phase)last_activity=s.us;
-        }
-        demo_event_t e;n=0;
-        while(n++<16&&read_event(&e))receive(e);
-        int64_t now=now_us();
-        build_view(now);
-        BoardInput raw=board_input();
-        if(raw.next||raw.select||(raw.touch_valid&&raw.touch))last_activity=now;
-        input_tick(raw,now);
-        build_view(now);
-        if(view.page!=last_page) {last_page=view.page;last_activity=now;}
-        if(now-last_battery>=1000000) {last_battery=now;ui.battery_percent=board_battery_percent();}
-        char line[80];
-        if(read_command(line,sizeof line)) {
-            if(!strcmp(line,"screen"))board_dump();
-            else if(!strcmp(line,"status")||!strcmp(line,"color"))print_status(now);
-            else if(!strcmp(line,"stream")) {streaming=!streaming;printf("STREAM %s\n",streaming?"on":"off");}
-            else if(!strcmp(line,"select")||!strcmp(line,"calibrate")) {last_activity=now;action();}
-            else if(!strcmp(line,"back")||!strcmp(line,"home")) {last_activity=now;back();}
-            build_view(now);
-        }
-        if(network_activity_us>last_activity)last_activity=network_activity_us;
-        // Same global idle policy as the brew assistant; sensor samples are not activity.
-        if(now-last_activity>=idle_limit_us) {
-            ESP_LOGI(TAG,"No interaction or state change for 10 minutes; shutting down");
-            board_shutdown();vTaskSuspend(nullptr);
-        }
-        bool animating=ui_color_tick(view,now);
-        if(now-last_draw>=(animating?design::motion::frame_us:100000)) {ui_color_draw(view,ui);board_present();last_draw=now;}
-        vTaskDelay(pdMS_TO_TICKS(5));
-    }
 }
+void color_mode_leave() {
+    if(calibrating&&cal.phase!=RC_CAL_DONE&&cal.phase!=RC_CAL_FAILED)ESP_LOGI(TAG,"calibration canceled; LED %u kept",pa);
+    calibrating=false;streaming=false;color_sensor_stop();ESP_LOGI(TAG,"left roast color mode");
+}
+bool color_mode_tick(int64_t now) {
+    bool changed=false;color_sample_t s;unsigned n=0;
+    while(n++<16&&color_sensor_next(&s)) {
+        unsigned count=meter.count;bool loaded=meter.loaded;rc_cal_phase_t phase=cal.phase;
+        feed(s);
+        changed|=meter.count!=count||meter.loaded!=loaded||cal.phase!=phase;
+    }
+    ColorPage before=view.page;build_view(now);
+    return changed||view.page!=before;
+}
+bool color_mode_input(BoardInput raw,int64_t now,UiState &ui) {held_ui=&ui;bool home=input_tick(raw,now);build_view(now);return home;}
+// About a second of failed reads, or no sample for 3 s, means the sensor is gone.
+bool color_mode_sensor_lost(int64_t now) {return color_sensor_errors()>=25||now-last_sample_us>3000000;}
+void color_mode_record(const cw_record_status_t &status) {
+    if(group_id[0]&&!strcmp(status.id,group_id)&&status.revision>=upload_state.revision) {upload_state=status;upload_known=true;}
+}
+bool color_mode_console(const char *line,int64_t now) {
+    if(!strcmp(line,"status")||!strcmp(line,"color"))print_status(now);
+    else if(!strcmp(line,"stream")) {streaming=!streaming;printf("STREAM %s\n",streaming?"on":"off");}
+    else if(!strcmp(line,"select")||!strcmp(line,"calibrate"))action();
+    else if(!strcmp(line,"back"))back();
+    else return false;
+    build_view(now);return true;
+}
+bool color_mode_animating(int64_t now) {return ui_color_tick(view,now);}
+void color_mode_draw(const UiState &ui) {ui_color_draw(view,ui);}

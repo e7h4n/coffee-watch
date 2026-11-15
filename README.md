@@ -6,6 +6,15 @@ Coffee Watch connects an M5Stack StopWatch, a Bluetooth coffee scale, and a
 refractometer. A defined brewing workflow brings measurements from these devices
 together to calculate and present your brew data with minimal manual recording.
 
+## Home
+
+The watch starts on Home: **Connect scale or color sensor**, a Brew and a Roast
+color tile, and Wi-Fi setup. Whichever connects first picks the product: the scale
+opens the brew assistant, the RoastWatch color sensor opens roast color mode. Hold
+both keys for 0.9 s on any page to return Home; a device that is still connected is
+then offered as a lit tile instead of reopening by itself. Wi-Fi and Dropbox are
+shared by both.
+
 ## From brewing to a report
 
 1. **Choose a brewer.** Select V60, Hario Switch, AeroPress, or Ceado Hoop.
@@ -68,8 +77,8 @@ devices and firmware versions. Other models and versions have not been validated
 
 ## Roast color mode
 
-With the RoastWatch adapter and its MAX30101 sensor attached at power-on, the
-watch boots as a roast colorimeter instead of the brew assistant. Place it on a
+Attach the RoastWatch adapter with its MAX30101 sensor and Home opens roast color
+mode. Place it on a
 scraped-flat sample cup: each placement records one reading after 2 stable
 seconds, and three placements give the mean and its spread. Calibrate once on
 fresh baking soda, which sets the IR LED so it reads 230. Every reading is
@@ -79,7 +88,7 @@ and is not an Agtron value. See [Roast color mode](spec/colorimeter.md).
 
 ## Wi-Fi setup
 
-On the idle screen, tap **Wi-Fi setup**, then open the
+On Home, tap **Wi-Fi setup**, then open the
 [Chrome setup page](https://e7h4n.github.io/coffee-watch/). Connect over Web
 Bluetooth, enter the pairing code shown on the watch if requested, and submit
 your 2.4 GHz network details. Credentials go directly to the watch; the static

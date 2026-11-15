@@ -7,6 +7,9 @@ mode (manual or Auto submode; the watch never arms Auto), the bed probe, and
 DiFluid RS v002-005. Brewers: V60, Switch, AeroPress and Hoop. The complete
 brewing assembly sits on the scale while pouring.
 
+0. Home: the scale link (or, for [roast color](colorimeter.md), the color sensor)
+   arriving first opens its product. Holding both keys 900 ms returns Home from any
+   page; a scale still connected is then a Brew tile rather than an automatic entry.
 1. Connect the scale and select a brewer. RS is not needed yet.
 2. Place an empty server. Capture weight >10g stable within 0.2g for 5 seconds.
    Optional Reset dispatches tare; ATT success never claims tare completion.

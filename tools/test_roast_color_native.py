@@ -26,7 +26,7 @@ class RoastColorNativeTests(unittest.TestCase):
                             str(root / 'max30101/test/test_max30101.c'), '-o', executable],
                            check=True, capture_output=True, text=True, timeout=60)
             result = subprocess.run([executable], check=True, capture_output=True, text=True, timeout=10)
-            self.assertIn('5 max30101 scenarios passed', result.stdout)
+            self.assertIn('6 max30101 scenarios passed', result.stdout)
 
 
 if __name__ == '__main__':

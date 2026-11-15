@@ -68,6 +68,10 @@ int main(void) {
     f.regs[MAX30101_REG_FIFO_WR]=12;assert(max30101_set_ir(&bus,200)&&f.regs[MAX30101_REG_LED_IR]==200);
     assert(max30101_read_ir(&bus,ir,32)==0);
     scenarios++;
+    // Shutdown keeps SpO2 mode with SHDN set; configure wakes it with a reset.
+    assert(max30101_shutdown(&bus)&&f.regs[MAX30101_REG_MODE]==0x83);
+    assert(max30101_configure(&bus,135)&&f.regs[MAX30101_REG_MODE]==0x03);
+    scenarios++;
     printf("%d max30101 scenarios passed\n",scenarios);
     return 0;
 }

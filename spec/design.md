@@ -71,6 +71,11 @@ business state or reset the 10-minute idle timer. No other device is queried.
   title or hint text. Both charts span 2:30, then 4:00, 6:00 and further two-minute
   steps; the curve compresses rather than scrolls. Readings below 60 °C enter from
   the bottom edge; missing readings break the line.
+- Home: `Connect scale or color sensor` (26) at y=118 over two 320×72 tiles
+  (radius 18) at y=160 and y=248, Brew and Roast color (32) with their device state
+  (18). A connected device's tile is filled with the button color and an accent
+  label (accent fill while pressed); otherwise it is an outline with muted text.
+  Wi-Fi setup is the bottom action.
 - Brewer carousel: cyclic positioning, scaling and easing with queued input.
 - Roast color pages: caption (26) at y=124, the index as the 90px hero at y=214
   (live in foreground while measuring, accent once recorded), the group's readings

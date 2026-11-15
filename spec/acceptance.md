@@ -30,8 +30,10 @@
       G8 voltage with rising probe temperature; 90 °C water reads 88–92 °C.
 - [ ] Start → pour → Stop produces `brew-<id>-trace.csv` at 10 Hz, `t_ms` 0 at
       the pour, and the record's `probe_trace` points to it.
-- [ ] Without the color sensor the watch boots into the brew assistant as before;
-      with the RoastWatch adapter and MAX30101 it boots into roast color mode.
+- [ ] Boot shows Home; the scale connecting opens the brewer carousel, attaching
+      the RoastWatch color sensor opens roast color, whichever is first.
+- [ ] Holding both keys 900 ms on any brew or color page returns Home; a still
+      connected device is a lit tile and a tap opens it; Wi-Fi setup works from Home.
 - [ ] Color mode warms up for 60 s; lifted (glass installed) reads below 28000 and
       the darkest sample above 30000 in `stream`.
 - [ ] Each placement records one reading after 2 stable seconds; staying on the
