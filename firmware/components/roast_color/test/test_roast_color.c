@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
+#include <string.h>
 #define STEP_US 80000LL
 static int scenarios;
 static bool near(float a,float b,float tolerance) {return fabsf(a-b)<=tolerance;}
@@ -134,9 +135,36 @@ static void calibration_failures(void) {
     assert(c.phase==RC_CAL_PLACE);
     scenarios++;
 }
+static void dropbox_record(void) {
+    rc_meter_t m;int64_t us=RC_WARMUP_US;rc_meter_init(&m,0);
+    feed(&m,80000,&us,RC_WINDOW_US+2*STEP_US);feed(&m,1000,&us,STEP_US);
+    assert(m.count==1&&m.raw_means[0]==80000&&m.reading_us[0]==RC_WARMUP_US+RC_WINDOW_US);
+    rc_record_t r;rc_record_from_meter(&r,&m,"a1b2c3-0000000f-00000001",150,true,229.54f);
+    // esp_timer 62 s is 2026-11-15T12:00:00Z.
+    int64_t offset=1794744000LL*1000000-(RC_WARMUP_US+RC_WINDOW_US);
+    char json[1024];int n=rc_record_json(&r,offset,json,sizeof json);
+    assert(n>0&&(size_t)n==strlen(json));
+    assert(!strcmp(json,"{\"schema_version\":1,\"kind\":\"roast_color\",\"id\":\"a1b2c3-0000000f-00000001\",\"revision\":1,"
+        "\"created_at\":\"2026-11-15T12:00:00Z\",\"status\":\"partial\",\"group_size\":3,\"readings\":[{\"measured_at\":\"2026-11-15T12:00:00Z\","
+        "\"index\":73.9,\"ir_raw\":80000}],\"mean_index\":73.9,\"sd\":null,\"retest\":null,\"ir_led_amplitude\":150,\"baking_soda_index\":229.5,"
+        "\"sensor\":\"MAX30101\",\"index_formula\":\"x - (117 - x) * 0.165, x = IR / 1000\"}\n"));
+    // Each reading rewrites the whole document; the third one completes it.
+    feed(&m,80500,&us,RC_WINDOW_US+2*STEP_US);feed(&m,1000,&us,STEP_US);
+    feed(&m,79500,&us,RC_WINDOW_US+2*STEP_US);
+    rc_record_from_meter(&r,&m,"a1b2c3-0000000f-00000001",150,false,0);
+    n=rc_record_json(&r,offset,json,sizeof json);
+    assert(n>0&&r.revision==3&&strstr(json,"\"revision\":3,\"created_at\":\"2026-11-15T12:00:00Z\",\"status\":\"complete\"")&&strstr(json,"\"measured_at\":\"2026-11-15T12:00:04Z\""));
+    assert(strstr(json,"\"sd\":0.58,\"retest\":false,")&&strstr(json,"\"baking_soda_index\":null,"));
+    // Leap day, and refusals: unsynchronized clock, bad id, no room.
+    r.reading_us[0]=0;assert(rc_record_json(&r,1835481599LL*1000000,json,sizeof json)>0&&strstr(json,"\"created_at\":\"2028-02-29T23:59:59Z\""));
+    assert(rc_record_json(&r,0,json,sizeof json)==-1);
+    rc_record_t bad=r;snprintf(bad.id,sizeof bad.id,"../x");assert(rc_record_json(&bad,offset,json,sizeof json)==-1);
+    assert(rc_record_json(&r,offset,json,64)==-1);
+    scenarios++;
+}
 int main(void) {
     formula();warmup_and_lift_between_readings();window_restarts();group_result_and_retest();
-    hysteresis_and_saturation();calibration();calibration_failures();
+    hysteresis_and_saturation();calibration();calibration_failures();dropbox_record();
     printf("%d roast color scenarios passed\n",scenarios);
     return 0;
 }

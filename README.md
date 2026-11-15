@@ -72,7 +72,8 @@ With the RoastWatch adapter and its MAX30101 sensor attached at power-on, the
 watch boots as a roast colorimeter instead of the brew assistant. Place it on a
 scraped-flat sample cup: each placement records one reading after 2 stable
 seconds, and three placements give the mean and its spread. Calibrate once on
-fresh baking soda, which sets the IR LED so it reads 230. The index uses the
+fresh baking soda, which sets the IR LED so it reads 230. Every reading is
+uploaded to Dropbox over the saved Wi-Fi as that group's JSON record. The index uses the
 open-source Roast Meter's sensor settings and formula; it ranks your own roasts
 and is not an Agtron value. See [Roast color mode](spec/colorimeter.md).
 

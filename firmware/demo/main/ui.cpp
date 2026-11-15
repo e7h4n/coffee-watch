@@ -389,6 +389,11 @@ void ui_color_draw(const ColorView &v,const UiState &u) {
         else text("Not calibrated",234,332,20,ACCENT);
     };
     bool on;const char *action=ui_color_action(v,&on);
+    // Upload state of the current group, under the battery.
+    if(v.sync_visible) {
+        const char *label=v.sync_unconfigured?"Dropbox not set up":v.sync==CW_RECORD_SAVING?"Dropbox: saving":v.sync==CW_RECORD_SAVED?"Dropbox: saved":"Dropbox: save failed";
+        text(label,234,66,18,v.sync==CW_RECORD_SAVED?ACCENT:MUTED);
+    }
     switch(v.page) {
     case COLOR_WARMUP:
         text("Warming up",234,124,design::type::body,MUTED);

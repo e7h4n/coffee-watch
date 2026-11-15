@@ -193,6 +193,7 @@ static void console_task(void *arg) {
         else if(n<sizeof line-1)line[n++]=ch;
     }
 }
+static bool next_event(demo_event_t *e) {return xQueueReceive(events,e,0)==pdTRUE;}
 static bool console_line(char *line,size_t size) {
     ConsoleCommand c;if(xQueueReceive(console_commands,&c,0)!=pdTRUE)return false;
     snprintf(line,size,"%s",c.line);return true;
@@ -202,7 +203,7 @@ extern "C" void app_main() {
     events=xQueueCreate(128,sizeof(demo_event_t));console_commands=xQueueCreate(4,sizeof(ConsoleCommand));configASSERT(events&&console_commands);
     cw_init(&flow);flow.brewer=saved_brewer();board_init();
     // A roast-color sensor on G5/G6 at boot makes this a colorimeter instead of the brew assistant.
-    if(color_sensor_detect()) {xTaskCreate(console_task,"console",4096,nullptr,2,nullptr);color_mode_run(console_line);}
+    if(color_sensor_detect()) {xTaskCreate(console_task,"console",4096,nullptr,2,nullptr);color_mode_run(console_line,next_event);}
     probe_trace_init();ui.battery_percent=board_battery_percent();ui_tick(flow,ui,now_us());ui_draw(flow,ui);board_present();
     uint8_t mac[6];esp_read_mac(mac,ESP_MAC_WIFI_STA);char session[40];
     snprintf(session,sizeof session,"%02x%02x%02x%02x%02x%02x-%08lx%08lx",mac[0],mac[1],mac[2],mac[3],mac[4],mac[5],(unsigned long)esp_random(),(unsigned long)esp_random());cw_record_init(&records,session);

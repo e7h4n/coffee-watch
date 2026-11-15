@@ -25,6 +25,8 @@ struct ColorView {
     uint32_t warmup_ms=0;
     bool calibrated=false;float soda=0;unsigned pa=0;
     ColorFailure failure=COLOR_FAIL_MOVED;float cal_index=0;
+    // Dropbox state of the current group's latest upload; hidden when there is none.
+    bool sync_visible=false;cw_record_sync_t sync=CW_RECORD_SAVING;bool sync_unconfigured=false;
 };
 // Bottom action: Calibrate, Cancel or Done; enabled reports whether it can run.
 const char *ui_color_action(const ColorView &v,bool *enabled);

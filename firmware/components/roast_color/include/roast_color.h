@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #ifdef __cplusplus
 extern "C" {
@@ -50,6 +51,8 @@ typedef struct {
     uint32_t raw;int64_t raw_us;
     rc_window_t window;
     unsigned count;float readings[RC_GROUP];
+    // Per reading: the window's mean IR and when it completed (esp_timer us).
+    uint32_t raw_means[RC_GROUP];int64_t reading_us[RC_GROUP];
     float mean,sd;bool retest;
 } rc_meter_t;
 void rc_meter_init(rc_meter_t *m,int64_t start_us);
@@ -58,6 +61,19 @@ void rc_meter_clear(rc_meter_t *m);
 // Feeds one sample; returns RC_EV_* bits for what it changed.
 unsigned rc_meter_sample(rc_meter_t *m,uint32_t raw,int64_t us);
 rc_phase_t rc_meter_phase(const rc_meter_t *m,int64_t now_us);
+
+// One group as a Dropbox document, rewritten whole after every reading (revision =
+// readings so far). id is letters, digits and '-'; times are esp_timer microseconds.
+typedef struct {
+    char id[64];unsigned revision,count;
+    float readings[RC_GROUP];uint32_t raw_means[RC_GROUP];int64_t reading_us[RC_GROUP];
+    float mean,sd;bool retest;
+    unsigned led;bool calibrated;float soda;
+} rc_record_t;
+void rc_record_from_meter(rc_record_t *r,const rc_meter_t *m,const char *id,unsigned led,bool calibrated,float soda);
+// JSON document; wall_offset_us turns esp_timer time into Unix time (UTC).
+// Returns the length, or -1 if invalid or it does not fit.
+int rc_record_json(const rc_record_t *r,int64_t wall_offset_us,char *out,size_t capacity);
 
 // Baking-soda calibration: find the IR amplitude whose reading is closest to
 // RC_SODA_INDEX. It probes 255 (failing if even that is too dark), bisects 1..255,

@@ -5,6 +5,7 @@
 #include "dropbox_packet.h"
 #include "brew_record.h"
 #include "brew_trace.h"
+#include "roast_color.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -14,6 +15,9 @@ void dropbox_setup_init(void);
 // Takes ownership of trace (may be NULL); it is uploaded only with a record's first draft.
 bool dropbox_setup_record(const cw_brew_record_t *record,cw_trace_snapshot_t *trace);
 void demo_record_status(const cw_record_status_t *status);
+// Roast-color group: /roast-color-<id>.json, rewritten whole after every reading.
+// Status arrives through demo_record_status like a brew record.
+bool dropbox_setup_color(const rc_record_t *record);
 bool dropbox_setup_submit(const cw_dropbox_command_t *command);
 // Called only from the NimBLE host task; keeps one snapshot for Read Blob.
 int dropbox_setup_status(char *json,int capacity);

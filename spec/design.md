@@ -79,7 +79,8 @@ business state or reset the 10-minute idle timer. No other device is queried.
   SD, in accent when it asks for a retest. The warm-up countdown uses the hero
   font. Calibration pages show `Place on baking soda` or `Hold still` (34) with
   the bar following the placement window, then the steps; the bottom action is
-  Calibrate, Cancel or Done.
+  Calibrate, Cancel or Done. The current group's Dropbox state (18) sits at y=66
+  under the battery, accent once saved.
 
 ## Motion
 

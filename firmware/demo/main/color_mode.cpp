@@ -9,6 +9,10 @@
 #include "esp_timer.h"
 #include "esp_log.h"
 #include "nvs.h"
+#include "esp_mac.h"
+#include "esp_random.h"
+#include "wifi_setup.h"
+#include "dropbox_setup.h"
 #include <cstdio>
 #include <cstring>
 static const char *TAG="color";
@@ -21,6 +25,12 @@ static float soda;
 static int64_t start_us,last_sample_us;
 static ColorView view;
 static UiState ui;
+// Dropbox: one record per group, named <session>-<sequence> like brew records.
+static char session[40],group_id[64];
+static unsigned group_sequence;
+static cw_record_status_t upload_state;
+static bool upload_known;
+static int64_t network_activity_us;
 static int64_t now_us() {return esp_timer_get_time();}
 // The calibrated IR amplitude and its baking-soda reading survive reboots.
 static void load_settings() {
@@ -66,6 +76,10 @@ static void build_view(int64_t now) {
     v.mean=meter.mean;v.sd=meter.sd;v.retest=meter.retest;
     v.warmup_ms=meter.ready_us>now?(uint32_t)((meter.ready_us-now)/1000):0;
     v.calibrated=calibrated;v.soda=soda;v.pa=pa;
+    bool group_page=v.page==COLOR_PLACE||v.page==COLOR_MEASURING||v.page==COLOR_READING||v.page==COLOR_RESULT;
+    if(group_page&&meter.count&&upload_known&&!strcmp(upload_state.id,group_id)) {
+        v.sync_visible=true;v.sync=upload_state.state;v.sync_unconfigured=upload_state.state==CW_RECORD_FAILED&&!strcmp(upload_state.error,"authorize_first");
+    }
     if(calibrating) {
         v.progress=cal.phase==RC_CAL_SETTLE?cal.window.progress:rc_cal_progress(&cal);
         v.pa=cal.phase==RC_CAL_FAILED?cal.original:cal.pa;
@@ -88,6 +102,17 @@ static void back() {
     if(calibrating) {if(cal.phase!=RC_CAL_DONE&&cal.phase!=RC_CAL_FAILED)ESP_LOGI(TAG,"calibration canceled; LED %u kept",pa);resume_measuring();}
     else rc_meter_clear(&meter);
 }
+// Every reading uploads the whole group; the first reading of a group names it.
+static void upload_group() {
+    if(meter.count==1)snprintf(group_id,sizeof group_id,"%s-%08x",session,++group_sequence);
+    rc_record_t record;rc_record_from_meter(&record,&meter,group_id,pa,calibrated,soda);
+    upload_state={};upload_state.state=CW_RECORD_SAVING;upload_state.revision=record.revision;snprintf(upload_state.id,sizeof upload_state.id,"%s",group_id);upload_known=true;
+    dropbox_setup_color(&record);
+}
+static void receive(const demo_event_t &e) {
+    if(e.kind==DE_WIFI)network_activity_us=e.us;
+    else if(e.kind==DE_RECORD&&!strcmp(e.data.record.id,group_id)&&e.data.record.revision>=upload_state.revision) {upload_state=e.data.record;upload_known=true;network_activity_us=e.us;}
+}
 static void log_events(unsigned events) {
     if(events&RC_EV_READING)ESP_LOGI(TAG,"READING %u/3 index=%.1f raw=%lu led=%u",meter.count,(double)meter.readings[meter.count-1],(unsigned long)meter.raw,pa);
     if(events&RC_EV_RESULT)ESP_LOGI(TAG,"RESULT mean=%.1f sd=%.2f readings=%.1f,%.1f,%.1f led=%u soda=%.1f retest=%u",(double)meter.mean,(double)meter.sd,
@@ -96,7 +121,12 @@ static void log_events(unsigned events) {
 static void feed(const color_sample_t &s) {
     last_sample_us=s.us;
     if(streaming)printf("IR t_ms=%lld raw=%lu led=%u\n",(long long)(s.us/1000),(unsigned long)s.raw,s.pa);
-    if(!calibrating) {if(s.pa==pa)log_events(rc_meter_sample(&meter,s.raw,s.us));return;}
+    if(!calibrating) {
+        if(s.pa!=pa)return;
+        unsigned events=rc_meter_sample(&meter,s.raw,s.us);log_events(events);
+        if(events&RC_EV_READING)upload_group();
+        return;
+    }
     rc_cal_phase_t before=cal.phase;uint8_t level=0;
     if(rc_cal_sample(&cal,s.raw,s.pa,s.us,&level))color_sensor_set_ir(level);
     if(cal.phase==before)return;
@@ -144,8 +174,12 @@ static void print_status(int64_t now) {
         (int)view.page,(unsigned long)meter.raw,(double)rc_index((float)meter.raw),meter.loaded,meter.count,(double)meter.mean,(double)meter.sd,pa,calibrated,(double)soda,
         (unsigned long)view.warmup_ms,color_sensor_errors(),(long long)((now-last_sample_us)/1000));
 }
-void color_mode_run(bool (*read_command)(char *line,size_t size)) {
+void color_mode_run(bool (*read_command)(char *line,size_t size),bool (*read_event)(demo_event_t *event)) {
     load_settings();
+    uint8_t mac[6];esp_read_mac(mac,ESP_MAC_WIFI_STA);
+    snprintf(session,sizeof session,"%02x%02x%02x%02x%02x%02x-%08lx%08lx",mac[0],mac[1],mac[2],mac[3],mac[4],mac[5],(unsigned long)esp_random(),(unsigned long)esp_random());
+    // Joins the saved network once and starts the Dropbox worker with its saved authorization.
+    wifi_setup_init();
     start_us=last_sample_us=now_us();
     color_sensor_start(pa);rc_meter_init(&meter,start_us);
     ESP_LOGI(TAG,"roast color mode: LED %u, %s",pa,calibrated?"calibrated":"not calibrated");
@@ -161,6 +195,8 @@ void color_mode_run(bool (*read_command)(char *line,size_t size)) {
             feed(s);
             if(meter.count!=count||meter.loaded!=loaded||cal.phase!=phase)last_activity=s.us;
         }
+        demo_event_t e;n=0;
+        while(n++<16&&read_event(&e))receive(e);
         int64_t now=now_us();
         build_view(now);
         BoardInput raw=board_input();
@@ -178,6 +214,7 @@ void color_mode_run(bool (*read_command)(char *line,size_t size)) {
             else if(!strcmp(line,"back")||!strcmp(line,"home")) {last_activity=now;back();}
             build_view(now);
         }
+        if(network_activity_us>last_activity)last_activity=network_activity_us;
         // Same global idle policy as the brew assistant; sensor samples are not activity.
         if(now-last_activity>=idle_limit_us) {
             ESP_LOGI(TAG,"No interaction or state change for 10 minutes; shutting down");

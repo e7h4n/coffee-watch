@@ -36,6 +36,9 @@
       the darkest sample above 30000 in `stream`.
 - [ ] Each placement records one reading after 2 stable seconds; staying on the
       sample adds none; three placements show the mean, readings and SD.
+- [ ] With Wi-Fi and Dropbox set up in the brew assistant, every color reading
+      updates `/roast-color-<id>.json` (status `complete` after the third) and the
+      watch shows `Dropbox: saved`.
 - [ ] Baking-soda calibration ends near 230 (within one LED step), survives a reboot, and Cancel or a
       failure keeps the previous LED level.
 

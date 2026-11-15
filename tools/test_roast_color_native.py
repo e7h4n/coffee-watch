@@ -15,7 +15,7 @@ class RoastColorNativeTests(unittest.TestCase):
                             str(root / 'roast_color/test/test_roast_color.c'), '-lm', '-o', executable],
                            check=True, capture_output=True, text=True, timeout=60)
             result = subprocess.run([executable], check=True, capture_output=True, text=True, timeout=10)
-            self.assertIn('7 roast color scenarios passed', result.stdout)
+            self.assertIn('8 roast color scenarios passed', result.stdout)
 
     def test_max30101_registers_and_fifo(self):
         root = Path(__file__).resolve().parents[1] / 'firmware/components'

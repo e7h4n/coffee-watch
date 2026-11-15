@@ -25,9 +25,11 @@ the bus is deleted, G5/G6 return to their reset state and the brew assistant
 starts. The choice holds until the next power-on; plugging the sensor in later
 does nothing.
 
-Roast color mode does not start the scale or RS connections, Bluetooth setup or
-Wi-Fi. The battery widget, the 10-minute idle power-off and the serial console
-remain.
+Roast color mode joins the saved Wi-Fi network once and uploads to the saved
+Dropbox app folder, exactly as the brew assistant does. It does not start the scale
+or RS connections or Bluetooth setup: configure Wi-Fi and Dropbox in the brew
+assistant (boot without the sensor); both modes share the stored settings. The
+battery widget, the 10-minute idle power-off and the serial console remain.
 
 ## Sensor configuration
 
@@ -86,6 +88,36 @@ are at most 11 steps, about 15 s with placement. Cancel, Back or a failure
 restores the previous amplitude; success stores the amplitude and the measured
 baking-soda index in NVS (`cw_color`: `ir_pa`, `soda_x10`), shown on later boots.
 
+## Dropbox records
+
+Every reading uploads its group as `/roast-color-<session>-<sequence>.json` in the
+app folder; `session` is the watch's MAC plus a random boot value, as for brew
+records. Each upload is the whole document, so the file always holds the readings
+so far:
+
+```json
+{"schema_version":1,"kind":"roast_color","id":"…","revision":2,
+ "created_at":"2026-11-15T12:00:00Z","status":"partial","group_size":3,
+ "readings":[{"measured_at":"2026-11-15T12:00:00Z","index":78.4,"ir_raw":113456},
+             {"measured_at":"2026-11-15T12:00:09Z","index":79.1,"ir_raw":114058}],
+ "mean_index":78.8,"sd":0.49,"retest":false,"ir_led_amplitude":150,
+ "baking_soda_index":229.5,"sensor":"MAX30101",
+ "index_formula":"x - (117 - x) * 0.165, x = IR / 1000"}
+```
+
+- `revision` is the number of readings; `status` turns `complete` at the third.
+  `sd` and `retest` are null with one reading; `baking_soda_index` is null before
+  the first calibration. `ir_raw` is the window's mean IR.
+- Times are UTC from SNTP; an upload waits up to 15 s for the clock and fails
+  without it. A group that is cleared early stays `partial`.
+- The first upload overwrites the path (unique to this boot); later ones update
+  exactly the revision this watch wrote, so an edit made elsewhere is reported
+  rather than replaced. A failed upload is not retried; the next reading uploads
+  the whole group again.
+- The line under the battery shows `Dropbox: saving`, `saved`, `save failed` or
+  `Dropbox not set up` for the current group. The serial log has the path and
+  error (`record color id=… state=… path=… error=…`).
+
 ## Serial console
 
 | Command | Output |
@@ -97,7 +129,7 @@ baking-soda index in NVS (`cw_color`: `ir_pa`, `soda_x10`), shown on later boots
 | `screen` | Framebuffer dump, as in the brew assistant |
 
 Every reading logs `READING n/3 index=… raw=… led=…` and every group logs
-`RESULT mean=… sd=… readings=… led=… soda=…`. Results are not uploaded yet.
+`RESULT mean=… sd=… readings=… led=… soda=…`.
 
 ## Not yet validated on hardware
 
