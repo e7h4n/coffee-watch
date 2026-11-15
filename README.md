@@ -59,11 +59,22 @@ this interval.
 | BOOKOO Themis Ultra | Coffee dose and weight | Firmware 4.0.1, Ratio mode (Auto not used) |
 | DiFluid RS | TDS measurement | Firmware v002-005 |
 | Bed probe | Brew start and temperature trace | 100 kΩ B3950 NTC on G8, G9 = 3V3/2 reference |
+| SparkFun SEN-16474 (MAX30101) | Roast color mode, on the RoastWatch adapter | G5 = SDA, G6 = SCL; not yet validated on hardware |
 
 This is a prototype with real brewing walkthroughs completed. The firmware
 connects to the two peers configured in its transport; a general device picker
 is not yet available. The workflow depends on the events provided by these
 devices and firmware versions. Other models and versions have not been validated.
+
+## Roast color mode
+
+With the RoastWatch adapter and its MAX30101 sensor attached at power-on, the
+watch boots as a roast colorimeter instead of the brew assistant. Place it on a
+scraped-flat sample cup: each placement records one reading after 2 stable
+seconds, and three placements give the mean and its spread. Calibrate once on
+fresh baking soda, which sets the IR LED so it reads 230. The index uses the
+open-source Roast Meter's sensor settings and formula; it ranks your own roasts
+and is not an Agtron value. See [Roast color mode](spec/colorimeter.md).
 
 ## Wi-Fi setup
 
@@ -91,6 +102,7 @@ building, and flashing.
 
 - [Visual system and shared components](spec/design.md)
 - [Product behavior and interactions](spec/product.md)
+- [Roast color mode](spec/colorimeter.md)
 - [Wi-Fi setup and provisioning](spec/wifi.md)
 - [Bluetooth interfaces](spec/bluetooth.md)
 - [Acceptance checklist](spec/acceptance.md)

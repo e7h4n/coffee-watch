@@ -30,6 +30,14 @@
       G8 voltage with rising probe temperature; 90 °C water reads 88–92 °C.
 - [ ] Start → pour → Stop produces `brew-<id>-trace.csv` at 10 Hz, `t_ms` 0 at
       the pour, and the record's `probe_trace` points to it.
+- [ ] Without the color sensor the watch boots into the brew assistant as before;
+      with the RoastWatch adapter and MAX30101 it boots into roast color mode.
+- [ ] Color mode warms up for 60 s; lifted (glass installed) reads below 28000 and
+      the darkest sample above 30000 in `stream`.
+- [ ] Each placement records one reading after 2 stable seconds; staying on the
+      sample adds none; three placements show the mean, readings and SD.
+- [ ] Baking-soda calibration ends near 230 (within one LED step), survives a reboot, and Cancel or a
+      failure keeps the previous LED level.
 
 Automated checks run with `python3 -m unittest discover -s tools -v`.
 Physical checks are a checklist, not an assertion that every release passed them.

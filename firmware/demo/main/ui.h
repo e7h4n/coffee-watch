@@ -13,3 +13,21 @@ bool ui_tick(const cw_flow_t &flow,const UiState &ui,int64_t now_us);
 void ui_draw(const cw_flow_t &flow,const UiState &ui);
 int ui_hit(const cw_flow_t &flow,int x,int y,const UiState *ui=nullptr);
 bool ui_enabled(const cw_flow_t &flow,int action,const UiState *ui=nullptr);
+
+// Roast-color mode (a MAX30101 answered at boot). Display-only view of the meter.
+enum ColorPage {COLOR_WARMUP,COLOR_PLACE,COLOR_MEASURING,COLOR_READING,COLOR_RESULT,COLOR_SATURATED,COLOR_NO_DATA,
+    COLOR_CAL_PLACE,COLOR_CAL_SETTLE,COLOR_CAL_STEP,COLOR_CAL_DONE,COLOR_CAL_FAILED};
+enum ColorFailure {COLOR_FAIL_TOO_DARK,COLOR_FAIL_MOVED};
+struct ColorView {
+    ColorPage page=COLOR_WARMUP;
+    bool live_valid=false;float live=0,progress=0;
+    unsigned count=0;float readings[3]={},mean=0,sd=0;bool retest=false;
+    uint32_t warmup_ms=0;
+    bool calibrated=false;float soda=0;unsigned pa=0;
+    ColorFailure failure=COLOR_FAIL_MOVED;float cal_index=0;
+};
+// Bottom action: Calibrate, Cancel or Done; enabled reports whether it can run.
+const char *ui_color_action(const ColorView &v,bool *enabled);
+bool ui_color_tick(const ColorView &v,int64_t now_us);
+void ui_color_draw(const ColorView &v,const UiState &ui);
+int ui_color_hit(const ColorView &v,int x,int y);

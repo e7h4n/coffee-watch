@@ -72,6 +72,14 @@ business state or reset the 10-minute idle timer. No other device is queried.
   steps; the curve compresses rather than scrolls. Readings below 60 °C enter from
   the bottom edge; missing readings break the line.
 - Brewer carousel: cyclic positioning, scaling and easing with queued input.
+- Roast color pages: caption (26) at y=124, the index as the 90px hero at y=214
+  (live in foreground while measuring, accent once recorded), the group's readings
+  (26) at y=286 from the second reading on, the stability bar at its usual place,
+  and one status line (20) at y=332: calibration state, `Reading n of 3`, or the
+  SD, in accent when it asks for a retest. The warm-up countdown uses the hero
+  font. Calibration pages show `Place on baking soda` or `Hold still` (34) with
+  the bar following the placement window, then the steps; the bottom action is
+  Calibrate, Cancel or Done.
 
 ## Motion
 

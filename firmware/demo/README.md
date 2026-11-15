@@ -28,6 +28,10 @@ The bed probe uses the back header: G8 is the NTC node (3V3 → 10 kΩ → G8 �
 100 kΩ B3950 NTC → GND) and G9 is a 3V3/2 reference. Serial command `probe`
 prints the current temperature, the G8/G9 voltages and the trace state.
 
+A MAX30101 roast-color sensor on G5 (SDA) / G6 (SCL) at power-on selects roast
+color mode instead (`main/color_mode.cpp`, `main/color_sensor.c`); see
+[Roast color mode](../../spec/colorimeter.md) for its rules and serial commands.
+
 The demo is paired to the two physical BLE addresses already verified in transport.c. It is not a general device-picker or configuration product.
 Start serial capture before connecting BLE; closing USB can reset StopWatch.
 
