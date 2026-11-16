@@ -26,12 +26,12 @@ static bool range(const cw_duo_ring_t *r,int64_t now,int64_t span,int32_t *sprea
 }
 static void settle(cw_duo_t *d,int32_t v,int64_t us) {
     int32_t lo=v<d->settle_min?v:d->settle_min,hi=v>d->settle_max?v:d->settle_max;
-    if(!d->settling||us-d->settle_last>CW_DUO_SETTLE_US||hi-lo>CW_DUO_SETTLE_CG) {
+    if(!d->settling||hi-lo>CW_DUO_SETTLE_CG) {
         d->settling=true;d->settle_min=d->settle_max=v;d->settle_first=d->settle_last=us;return;
     }
     d->settle_min=lo;d->settle_max=hi;d->settle_last=us;
 }
-static bool settled(const cw_duo_t *d) {return d->settling&&d->settle_last-d->settle_first>=CW_DUO_SETTLE_US;}
+static bool settled(const cw_duo_t *d,int64_t now) {return d->settling&&now-d->settle_first>=CW_DUO_SETTLE_US;}
 // The value a scale showed at time t: its last notification at or before t.
 static int32_t value_at(const cw_duo_ring_t *r,int64_t t) {
     for(unsigned k=0;k<r->count;k++)if(at(r,k)->us<=t)return at(r,k)->cg;
@@ -53,16 +53,26 @@ void cw_duo_weight(cw_duo_t *d,unsigned scale,int64_t us,int32_t cg) {
     unsigned cup=1-d->total;
     // Roles: the larger gain is the total scale; a sustained lead of the other swaps them.
     int32_t g_total=d->raw[d->total]-d->zero[d->total],g_cup=d->raw[cup]-d->zero[cup];
-    if(g_cup>g_total+CW_DUO_SWAP_CG) {
+    if(!d->lift_since&&g_cup>g_total+CW_DUO_SWAP_CG) {
         if(!d->swap_since)d->swap_since=us;
         else if(us-d->swap_since>=CW_DUO_SWAP_US) {
-            d->total=cup;cup=1-d->total;d->swap_since=0;d->settling=false;d->level_valid=false;
+            d->total=cup;cup=1-d->total;d->swap_since=0;d->settling=false;d->level_valid=false;d->lift_since=0;
+            d->out_high=g_total;d->out_rise_us=us;
             int32_t t=g_total;g_total=g_cup;g_cup=t;
         }
     } else d->swap_since=0;
     d->water_cg=g_total;d->out_cg=g_cup;
     if(scale==d->total)settle(d,g_total,us);
-    if(g_cup>=d->out_high+CW_DUO_RISE_CG) {d->out_high=g_cup;d->out_rise_us=us;}
+    if(g_cup>=d->out_high+CW_DUO_RISE_CG) {
+        int32_t spread;
+        // Only real cup notifications can produce a hint. With 0.1 g scales this
+        // is a newly observed mass step, never a promise to resolve each droplet.
+        if(d->phase==CW_DUO_BREWING&&scale==cup&&g_cup>=CW_DUO_MIN_OUT_CG&&
+           g_cup-d->out_high<=CW_DUO_DRIP_MAX_CG&&us-d->out_rise_us>=CW_DUO_SLOW_DRIP_US&&
+           range(&d->gain[d->total],us,CW_DUO_FLOW_US,&spread)&&spread<CW_DUO_POUR_QUIET_CG)
+            d->slow_drip_seq++;
+        d->out_high=g_cup;d->out_rise_us=us;
+    }
 }
 // Out flow over the last 2 s, with each scale's last value held between notifications.
 static void out_flow(cw_duo_t *d,int64_t now) {
@@ -95,7 +105,7 @@ cw_duo_start_t cw_duo_check(cw_duo_t *d,int64_t now) {
         if(!cw_pour_zero(&d->pour[o],d->pour[i].trigger_us,&other,NULL))return CW_DUO_NO_ZERO;
         d->zero[i]=zero;d->zero[o]=other;d->total=i;d->onset_us=onset;d->phase=CW_DUO_BREWING;
         d->swap_since=0;d->out_high=0;d->out_rise_us=onset;d->out_cgps=d->peak_cgps=0;d->open_valid=false;
-        d->level_valid=false;d->settling=false;d->out_frozen=false;d->resume_since=0;
+        d->level_valid=false;d->settling=false;d->lift_since=0;d->slow_drip_seq=0;d->out_frozen=false;d->resume_since=0;
         for(unsigned k=0;k<CW_DUO_SCALES;k++) {memset(&d->gain[k],0,sizeof d->gain[k]);push(&d->gain[k],now,d->raw[k]-d->zero[k]);}
         d->water_cg=d->raw[i]-zero;d->out_cg=d->raw[o]-other;
         return CW_DUO_START;
@@ -103,24 +113,29 @@ cw_duo_start_t cw_duo_check(cw_duo_t *d,int64_t now) {
     return CW_DUO_WAIT;
 }
 cw_duo_event_t cw_duo_step(cw_duo_t *d,int64_t now) {
-    unsigned cup=1-d->total;
     if(d->phase==CW_DUO_BREWING) {
         out_flow(d,now);
-        // A settled water level 30 g below the previous one: the dripper was lifted.
-        if(settled(d)) {
+        // Confirm the lower plateau, but timestamp the first observed fall. The
+        // total scale may stop notifying once stable: the probe clock confirms
+        // its held reading without inventing new weight samples.
+        if(d->level_valid&&d->water_cg<=d->level_cg-CW_DUO_LIFT_CG) {
+            if(!d->lift_since) {d->lift_since=d->raw_us[d->total];d->lift_out_cg=value_at(&d->gain[1-d->total],d->lift_since-1000000);d->lift_server=false;}
+            // Latch a correlated server fall until the total mass also recovers;
+            // returning the server cup-first must not validate the old low total.
+            if(d->out_cg<d->lift_out_cg-CW_DUO_FREEZE_CG)d->lift_server=true;
+        } else {d->lift_since=0;d->lift_server=false;}
+        if(settled(d,now)) {
             int32_t v=(d->settle_min+d->settle_max)/2;
-            if(d->level_valid&&v<=d->level_cg-CW_DUO_LIFT_CG) {
-                d->phase=CW_DUO_ENDED;d->end_us=d->level_us;d->end_water=d->level_cg;d->end_out=d->out_cg;d->out_frozen=false;d->resume_since=0;
+            if(d->level_valid&&d->lift_since&&v<=d->level_cg-CW_DUO_LIFT_CG) {
+                // A fresh cup reading distinguishes a dripper lift from a server
+                // removal whose cup-scale notification has not arrived yet.
+                if(d->raw_us[1-d->total]<d->lift_since)return CW_DUO_NONE;
+                // Removing the server lowers both scales: that is not a dripper lift.
+                if(d->lift_server)return CW_DUO_NONE;
+                d->phase=CW_DUO_ENDED;d->end_us=d->lift_since;d->end_water=d->level_cg;d->end_out=d->out_cg;d->out_frozen=false;d->resume_since=0;
                 return CW_DUO_LIFTED;
             }
             if(!d->level_valid||v>d->level_cg-CW_DUO_LIFT_CG) {d->level_cg=v;d->level_us=d->settle_last;d->level_valid=true;}
-        }
-        int32_t water_spread,out_spread;
-        if(now-d->onset_us>=CW_DUO_QUIET_US&&range(&d->gain[d->total],now,CW_DUO_QUIET_US,&water_spread)&&range(&d->gain[cup],now,CW_DUO_QUIET_US,&out_spread)&&
-           water_spread<CW_DUO_POUR_QUIET_CG&&out_spread<CW_DUO_DRIP_QUIET_CG&&d->out_cg>=CW_DUO_MIN_OUT_CG&&2*d->out_cg>=d->water_cg) {
-            d->phase=CW_DUO_ENDED;d->end_us=d->out_rise_us>d->onset_us?d->out_rise_us:d->onset_us;
-            d->end_water=d->water_cg;d->end_out=d->out_cg;d->out_frozen=false;d->resume_since=0;d->out_cgps=0;
-            return CW_DUO_DRAINED;
         }
         return CW_DUO_NONE;
     }
@@ -133,7 +148,7 @@ cw_duo_event_t cw_duo_step(cw_duo_t *d,int64_t now) {
     if(d->water_cg>=d->end_water+CW_DUO_RESUME_CG) {
         if(!d->resume_since)d->resume_since=now;
         else if(now-d->resume_since>=CW_DUO_RESUME_US) {
-            d->phase=CW_DUO_BREWING;d->resume_since=0;d->settling=false;d->level_valid=false;d->out_frozen=false;
+            d->phase=CW_DUO_BREWING;d->resume_since=0;d->settling=false;d->level_valid=false;d->lift_since=0;d->out_frozen=false;
             return CW_DUO_RESUMED;
         }
     } else d->resume_since=0;

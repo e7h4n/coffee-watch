@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "ui.h"
+#include "audio.h"
 #include "design.h"
 #include "probe_trace.h"
 #include "color_mode.h"
@@ -26,6 +27,7 @@ static unsigned rs_epoch;
 static cw_record_tracker_t records;
 static bool render_needed=true,rs_requested;
 static int64_t network_activity_us;
+static unsigned slow_drip_seen;
 static int64_t animation_start;
 static int queued[16];static unsigned queue_read,queue_write;
 extern "C" void demo_post(const demo_event_t *event) {configASSERT(xQueueSend(events,event,0)==pdTRUE);}
@@ -200,6 +202,24 @@ static void input_tick(BoardInput raw,int64_t now) {
 }
 // Second-scale notification statistics for the serial `scales` command.
 static unsigned aux_count;static int64_t aux_first_us,aux_last_us,aux_max_gap_us;
+// Scale and probe-clock transitions must publish the same draft/trace and start
+// RS discovery. In particular, a held CK811 reading can end on a probe tick.
+static void flow_follow(cw_stage_t before,int64_t us,bool record_event) {
+    trace_follow(us);
+    if(record_event) {
+        cw_brew_record_t record;
+        if(cw_record_event(&records,before,&flow,us,&record)) {
+            cw_record_status_t pending={};pending.state=CW_RECORD_SAVING;pending.revision=record.revision;snprintf(pending.id,sizeof pending.id,"%s",record.id);ui.record=pending;ui.record_visible=true;
+            dropbox_setup_record(&record,record.revision==1?probe_trace_snapshot():nullptr);
+        }
+    }
+    if(flow.stage==CW_TDS&&!rs_requested) {rs_requested=true;transport_find_rs();}
+    if(before!=flow.stage) {
+        ui.held=0;ui.result_page=0;ui.page_us=us;
+        ESP_LOGI("flow","stage=%u generation=%u brew=%u dose_valid=%u empty=%ld beverage=%ld",flow.stage,flow.generation,flow.scale.brew_id,flow.scale.dose_valid,(long)flow.empty_cg,(long)flow.beverage_cg);
+        if(flow.stage==CW_REPORT)ESP_LOGI("flow","REPORT dose=%.1f water=%.1f beverage=%.1f time_ms=%u tds=%.8f extraction=%.8f",flow.result.dose_cg/100.,flow.result.water_cg/100.,flow.beverage_cg/100.,(unsigned)flow.result.elapsed_ms,(double)flow.tds,(double)flow.extraction);
+    }
+}
 static void receive(const demo_event_t &e) {
     cw_stage_t before=flow.stage;
     switch(e.kind) {
@@ -234,21 +254,7 @@ static void receive(const demo_event_t &e) {
         break;
     case DE_ERROR:snprintf(flow.error,sizeof flow.error,"%s",e.data.error);ESP_LOGE("flow","%s",flow.error);break;
     }
-    trace_follow(e.us);
-    if(e.kind==DE_SCALE||e.kind==DE_RS||e.kind==DE_AUX) {
-        cw_brew_record_t record;
-        if(cw_record_event(&records,before,&flow,e.us,&record)) {
-            cw_record_status_t pending={};pending.state=CW_RECORD_SAVING;pending.revision=record.revision;snprintf(pending.id,sizeof pending.id,"%s",record.id);ui.record=pending;ui.record_visible=true;
-            // The 10 Hz weight/temperature trace goes to Dropbox once, with the first draft.
-            dropbox_setup_record(&record,record.revision==1?probe_trace_snapshot():nullptr);
-        }
-    }
-    if(flow.stage==CW_TDS&&!rs_requested) {rs_requested=true;transport_find_rs();}
-    if(before!=flow.stage) {
-        ui.held=0;ui.result_page=0;ui.page_us=e.us;
-        ESP_LOGI("flow","stage=%u generation=%u brew=%u dose_valid=%u empty=%ld beverage=%ld",flow.stage,flow.generation,flow.scale.brew_id,flow.scale.dose_valid,(long)flow.empty_cg,(long)flow.beverage_cg);
-        if(flow.stage==CW_REPORT)ESP_LOGI("flow","REPORT dose=%.1f water=%.1f beverage=%.1f time_ms=%u tds=%.8f extraction=%.8f",flow.result.dose_cg/100.,flow.result.water_cg/100.,flow.beverage_cg/100.,(unsigned)flow.result.elapsed_ms,(double)flow.tds,(double)flow.extraction);
-    }
+    flow_follow(before,e.us,e.kind==DE_SCALE||e.kind==DE_RS||e.kind==DE_AUX);
     render_needed=true;
 }
 struct ConsoleCommand {char line[80];};
@@ -285,9 +291,7 @@ extern "C" void app_main() {
             probe_seq=probe.seq;cw_stage_t before=flow.stage;bool was_interrupted=flow.interrupted;
             cw_probe_message(&flow,probe.valid,probe.celsius,probe.us);
             if(flow.stage!=before) {
-                // Ready -> Brew allocates the record identity, as for scale-driven transitions.
-                cw_brew_record_t unused;cw_record_event(&records,before,&flow,probe.us,&unused);
-                trace_follow(probe.us);ui.held=0;ui.result_page=0;ui.page_us=probe.us;
+                flow_follow(before,probe.us,true);
                 ESP_LOGI("flow","stage=%u generation=%u zero=%ld onset=%lld",flow.stage,flow.generation,(long)flow.zero_cg,(long long)flow.onset_us);
             }
             if(flow.stage!=before||flow.interrupted!=was_interrupted)render_needed=true;
@@ -317,6 +321,12 @@ extern "C" void app_main() {
         if(app.mode!=last_mode) {last_mode=app.mode;last_activity=now;render_needed=true;}
         ui.home=app.mode==CW_APP_HOME;ui.home_scale=flow.scale_ready||flow.aux_ready;ui.home_color=app.sensor_present;dual_view();
         trace_follow(now);
+        if(flow.duo.slow_drip_seq!=slow_drip_seen) {
+            slow_drip_seen=flow.duo.slow_drip_seq;
+            if(flow.dual&&flow.stage==CW_BREW&&!flow.interrupted&&slow_drip_seen) {
+                audio_chirp();ESP_LOGI("flow","slow-drip hint seq=%u out_cg=%ld",slow_drip_seen,(long)flow.duo.out_cg);
+            }
+        }
         if(now-last_battery>=1000000) {
             last_battery=now;battery_percent=board_battery_percent();
         }
@@ -338,6 +348,7 @@ extern "C" void app_main() {
                 printf("SCALES bookoo=%u aux=%u aux_cg=%ld aux_count=%u aux_hz=%.2f aux_max_gap_ms=%lld aux_last_ms_ago=%lld\n",flow.scale_ready,flow.aux_ready,(long)flow.aux_cg,aux_count,
                     aux_count>1&&span>0?(aux_count-1)/span:0.0,(long long)(aux_max_gap_us/1000),(long long)(aux_count?(now-aux_last_us)/1000:-1));
             }
+            else if(!strcmp(cmd.line,"beep")) {audio_chirp();puts("BEEP quiet 30ms requested");}
             else if(!strcmp(cmd.line,"mode"))printf("MODE %s sensor=%u scale=%u\n",app.mode==CW_APP_HOME?"home":app.mode==CW_APP_BREW?"brew":"color",app.sensor_present,flow.scale_ready);
             else if(!strcmp(cmd.line,"netstatus"))printf("NETWORK state=%u setup=%u paired=%u saved=%u reason=%d setup_error=%d\n",ui.network.state,ui.network.setup_active,ui.network.paired,ui.network.saved,ui.network.reason,ui.network.setup_error);
             else if(!strcmp(cmd.line,"status")) {

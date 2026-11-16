@@ -5,7 +5,7 @@ documentation: https://docs.espressif.com/projects/esp-iot-solution/zh_CN/latest
 issues: https://github.com/espressif/esp-iot-solution/issues
 repository: git://github.com/espressif/esp-iot-solution.git
 repository_info:
-  commit_sha: e016cb9e5221f8016ff6371d3babdda15f4934a7
+  commit_sha: da53cfaa90b63085ef21f721f7593b5e2747d448
   path: tools/cmake_utilities
 url: https://github.com/espressif/esp-iot-solution/tree/master/tools/cmake_utilities
-version: 1.3.0
+version: 1.4.1

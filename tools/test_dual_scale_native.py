@@ -22,7 +22,7 @@ def run(name, sources, includes, expected):
 class DualScaleNativeTests(unittest.TestCase):
     def test_two_scale_brew_logic(self):
         self.assertTrue(run('test_duo', ['coffee_flow/duo.c', 'coffee_flow/pour.c', 'coffee_flow/test/test_duo.c'],
-                            ['coffee_flow/include'], '9 duo scenarios passed'))
+                            ['coffee_flow/include'], '16 duo scenarios passed'))
 
     def test_ck811_frames(self):
         self.assertTrue(run('test_ck811', ['ck811/ck811.c', 'ck811/test/test_ck811.c'], ['ck811/include'],

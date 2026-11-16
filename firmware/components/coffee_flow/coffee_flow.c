@@ -99,7 +99,7 @@ static void dual_step(cw_flow_t *s,int64_t us) {
     }
     if(s->stage!=CW_BREW&&s->stage!=CW_TDS)return;
     cw_duo_event_t e=cw_duo_step(&s->duo,us);
-    if(s->stage==CW_BREW&&(e==CW_DUO_DRAINED||e==CW_DUO_LIFTED)) {dual_result(s,us);return;}
+    if(s->stage==CW_BREW&&e==CW_DUO_LIFTED) {dual_result(s,us);return;}
     if(s->stage!=CW_TDS)return;
     if(e==CW_DUO_RESUMED) {s->result_valid=false;s->beverage_valid=false;change(s,CW_BREW);return;}
     // Late drips until the TDS arrives, unless the server was lifted.
@@ -190,8 +190,11 @@ void cw_scale_message(cw_flow_t *s,unsigned epoch,const bookoo_message_t *m,int6
     }
 }
 void cw_probe_message(cw_flow_t *s,bool valid,float celsius,int64_t us) {
-    if(s->interrupted||!s->scale_ready||(s->stage!=CW_PREP&&s->stage!=CW_READY))return;
-    if(s->dual) {cw_duo_probe(&s->duo,us,valid,celsius);if(s->stage==CW_READY)dual_step(s,us);return;}
+    if(s->interrupted||!s->scale_ready)return;
+    if(s->dual&&(s->stage==CW_PREP||s->stage==CW_READY||s->stage==CW_BREW||s->stage==CW_TDS)) {
+        cw_duo_probe(&s->duo,us,valid,celsius);dual_step(s,us);return;
+    }
+    if(s->stage!=CW_PREP&&s->stage!=CW_READY)return;
     cw_pour_probe(&s->pour,us,valid,celsius);
     if(s->stage==CW_READY)pour_step(s,us);
 }

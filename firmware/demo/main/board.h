@@ -7,5 +7,7 @@ LGFX_Sprite &board_canvas();
 void board_present();
 void board_dump();
 void board_shutdown();
+// PA enable only, not a PWM/tone GPIO. Audio power remains on while brewing.
+void board_speaker_enable(bool enabled);
 // Estimated percentage from M5PM1 voltage, or -1 on read failure.
 int board_battery_percent();

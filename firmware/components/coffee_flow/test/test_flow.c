@@ -68,7 +68,12 @@ static void dual_brew(cw_flow_t *f) {
     dticks(f,40000,273000,85.f,100);assert(f->stage==CW_BREW);       // steep: nothing ends it
     for(int i=1;i<=95;i++)dtick(f,40000+i*200,273000,82.f);          // drain at 2 g/s
     dticks(f,59000,273000,80.f,30);assert(f->stage==CW_BREW);       // still settling
-    dticks(f,59000,273000,80.f,40);
+    dticks(f,59000,273000,80.f,40);assert(f->stage==CW_BREW); // quiet never ends
+    int64_t lift_us=us+50000;cw_aux_weight(f,9,228000,lift_us);
+    weight(f,59000,7); // fresh server weight after the total-scale fall
+    // One notification followed by silence: probe ticks confirm the held low value.
+    for(int i=1;i<=11;i++)cw_probe_message(f,true,80.f,lift_us+i*100000);
+    us=lift_us+1100000;assert(f->stage==CW_TDS&&f->duo.end_us==lift_us);
 }
 static int dual_scenarios(void) {
     int n=0;cw_flow_t f;uint8_t p[6];
@@ -80,9 +85,10 @@ static int dual_scenarios(void) {
     assert(f.stage==CW_TDS&&f.beverage_valid&&f.beverage_cg==19000&&f.result.water_cg==23000);
     assert(f.result.elapsed_ms>11000&&f.duo.open_valid);
     // Late drips raise the beverage; pouring again resumes the brew.
-    dticks(&f,19100+40000,273000,80.f,5);assert(f.beverage_cg==19100);
+    dticks(&f,19100+40000,228000,80.f,5);assert(f.beverage_cg==19100);
     dticks(&f,59100,276000,80.f,8);assert(f.stage==CW_BREW&&!f.result_valid);
-    dticks(&f,59100,276000,80.f,60);assert(f.stage==CW_TDS&&f.result.water_cg==26000);
+    dticks(&f,59100,276000,80.f,60);assert(f.stage==CW_BREW);
+    dticks(&f,59100,231000,80.f,12);assert(f.stage==CW_TDS&&f.result.water_cg==26000);
     rs_event_t r={.kind=RS_MEASUREMENT,.tds_percent=1.4f};cw_rs_link(&f,true);cw_rs_message(&f,&r,us+1);
     assert(f.stage==CW_REPORT&&fabsf(f.retention-(26000-19100)/1500.f)<.001f);
     n++;

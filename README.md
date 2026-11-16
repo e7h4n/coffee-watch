@@ -41,7 +41,8 @@ shared by both.
 
 With the BOOKOO and a Lefu CK811 both connected, steps 2 and 4 disappear: no empty
 server and no lifting, the watch tells the two scales apart, measures the beverage and
-the drip flow directly and ends the brew when the dripper has drained. See
+the drip flow directly and ends the brew only when the dripper is removed.
+Slow observed drip-weight steps can make a quiet advisory chirp; they never end the brew. See
 [Two-scale brewing](spec/two-scales.md).
 
 Mass and volume use one decimal place. V60 and Hoop use the measured beverage

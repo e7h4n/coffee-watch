@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 #include "board.h"
+#include "audio.h"
 #include <lgfx/v1/panel/Panel_AMOLED.hpp>
 #include <M5IOE1.h>
 #include <M5PM1.h>
@@ -151,6 +152,11 @@ void board_init() {
         m5ioe1_err_t error;ioe.pinModeWithRes(pin,OUTPUT,&error);configASSERT(error==M5IOE1_OK);
         ioe.digitalWriteWithRes(pin,1,&error);configASSERT(error==M5IOE1_OK);
     }
+    // Official StopWatch speaker path: PYG3 supplies ES8311, PYG10 enables PA.
+    // Some revisions also connect GPIO14 to PA: keep both enables consistent.
+    ioe.pinMode(M5IOE1_PIN_3,OUTPUT);ioe.pinMode(M5IOE1_PIN_10,OUTPUT);
+    gpio_reset_pin(GPIO_NUM_14);gpio_set_direction(GPIO_NUM_14,GPIO_MODE_OUTPUT);
+    board_speaker_enable(false);ioe.digitalWrite(M5IOE1_PIN_3,1);
     delay_ms(50);
     configASSERT(display.init());display.setBrightness(160);
     canvas.setPsram(true);canvas.setColorDepth(16);
@@ -161,6 +167,12 @@ void board_init() {
     uint8_t reg=0xa7,id=0;ESP_ERROR_CHECK(i2c_master_transmit_receive(touch,&reg,1,&id,1,100));
     ESP_LOGI("board","display=%dx%d touch_id=0x%02x",display.width(),display.height(),id);
     for(int pin: {1,2}) {gpio_reset_pin((gpio_num_t)pin);gpio_set_direction((gpio_num_t)pin,GPIO_MODE_INPUT);gpio_set_pull_mode((gpio_num_t)pin,GPIO_PULLUP_ONLY);}
+    if(audio_init(bus))board_speaker_enable(true);
+    else {board_speaker_enable(false);ESP_LOGW("board","audio unavailable; brewing continues silently");}
+}
+void board_speaker_enable(bool enabled) {
+    ioe.digitalWrite(M5IOE1_PIN_10,enabled?1:0);gpio_set_level(GPIO_NUM_14,enabled?1:0);
+    delay_ms(10);
 }
 BoardInput board_input() {
     BoardInput r={};r.next=!gpio_get_level(GPIO_NUM_2);r.select=!gpio_get_level(GPIO_NUM_1);
@@ -188,6 +200,7 @@ void board_dump() {
 }
 
 void board_shutdown() {
+    board_speaker_enable(false);
     configASSERT(pmic.shutdown()==M5PM1_OK);
 }
 
