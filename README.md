@@ -164,16 +164,26 @@ TLS uses PSRAM (`CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y`) so BLE, the display and
 speaker DMA do not leave it without a large enough internal RAM block. For an
 existing build directory, select **External SPIRAM** under **Component config →
 mbedTLS → Memory allocation strategy** in `idf.py menuconfig`; changing defaults
-alone does not override a previously generated `sdkconfig`.
+alone does not override a previously generated `sdkconfig`. Also apply these
+settings to existing generated configurations (all are in the defaults):
+
+- `CONFIG_MBEDTLS_HARDWARE_AES` disabled: its internal DMA bounce buffers can
+  fail even with TLS allocated in PSRAM; software AES avoids that dependency.
+- `CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y` to offload network allocations.
+- Static Wi-Fi TX buffers enabled, **4** buffers
+  (`CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=4`). Enabling network PSRAM allocation
+  selects a static pool; its default 16 buffers consumed nearly all remaining
+  internal RAM on this watch. Do not enable that option alone.
 
 Serial diagnostics: `dropbox status` reads the saved connection state;
 `dropbox check` refreshes authorization and uploads the existing
 `connection-check.json` test file, validating its returned content hash. Neither
 command erases credentials. Logs include HTTP status, request/response sizes and
 available TLS memory, never token response bodies or authorization headers.
-HTTPS bodies are sent in at most 1 KiB writes: ESP32-S3 hardware AES still needs
-internal DMA buffers even when mbedTLS uses PSRAM, so a single large CSV write
-can fail despite a successful small connection check.
+HTTPS bodies are sent in at most 1 KiB writes, independently of the software-AES
+configuration. A single large write with hardware AES previously failed despite
+a successful small connection check. Logs also distinguish received HTTP status,
+header-fetch failure and incomplete bodies rather than conflating all failures.
 A passed connection check does not replace full brew/trace/TDS upload testing.
 `dropbox test` exercises a synthetic 2,000-sample dual-scale CSV, draft JSON and
 final JSON through the real worker, using labelled `/connection-check-*` files
