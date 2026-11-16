@@ -104,7 +104,14 @@ static int http(const char *url,const char *body,size_t length,const char *type,
     esp_err_t opened=esp_http_client_open(h,(int)length);
     if(opened==ESP_OK) {
         bool sent=true;
-        while(sent_bytes<length) {int written=esp_http_client_write(h,body+sent_bytes,(int)(length-sent_bytes));if(written<=0) {sent=false;break;}sent_bytes+=(size_t)written;}
+        // Keep TLS records small: ESP32-S3 hardware AES needs internal DMA
+        // bounce buffers even when mbedTLS itself allocates in PSRAM.
+        while(sent_bytes<length) {
+            size_t chunk=length-sent_bytes;if(chunk>1024)chunk=1024;
+            int written=esp_http_client_write(h,body+sent_bytes,(int)chunk);
+            if(written<=0||written>(int)chunk) {sent=false;break;}
+            sent_bytes+=(size_t)written;
+        }
         if(sent&&esp_http_client_fetch_headers(h)>=0) {
             int used=0,read=0;
             while(used<RESPONSE_MAX-1&&(read=esp_http_client_read(h,response+used,RESPONSE_MAX-1-used))>0)used+=read;

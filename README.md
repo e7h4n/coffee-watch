@@ -171,6 +171,9 @@ Serial diagnostics: `dropbox status` reads the saved connection state;
 `connection-check.json` test file, validating its returned content hash. Neither
 command erases credentials. Logs include HTTP status, request/response sizes and
 available TLS memory, never token response bodies or authorization headers.
+HTTPS bodies are sent in at most 1 KiB writes: ESP32-S3 hardware AES still needs
+internal DMA buffers even when mbedTLS uses PSRAM, so a single large CSV write
+can fail despite a successful small connection check.
 A passed connection check does not replace full brew/trace/TDS upload testing.
 `dropbox test` exercises a synthetic 2,000-sample dual-scale CSV, draft JSON and
 final JSON through the real worker, using labelled `/connection-check-*` files

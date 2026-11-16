@@ -18,6 +18,8 @@
 #define esp_crt_bundle_attach NULL
 static char response[RESPONSE_MAX],access_token[2049]="secret-value",last_log[512];
 static int setup_calls,fail_at,opens,writes,cleanups,closes,reads;
+static int expected_length=6,max_write,accepted_bytes;
+static const char *expected_body;
 static bool init_fail,alloc_fail,partial,open_fail,incomplete;
 typedef int esp_err_t;
 typedef void *esp_http_client_handle_t;
@@ -33,8 +35,14 @@ static int64_t esp_timer_get_time(void) {return 1000;}
 static esp_http_client_handle_t esp_http_client_init(const esp_http_client_config_t *c) {assert(c->disable_auto_redirect);return init_fail?NULL:(void*)1;}
 static int esp_http_client_set_method(void *h,int method) {assert(h&&method==HTTP_METHOD_POST);return ++setup_calls==fail_at?ESP_ERR_NO_MEM:ESP_OK;}
 static int esp_http_client_set_header(void *h,const char *key,const char *value) {assert(h&&key&&value);return ++setup_calls==fail_at?ESP_ERR_NO_MEM:ESP_OK;}
-static int esp_http_client_open(void *h,int n) {assert(h&&n==6);opens++;return open_fail?-1:ESP_OK;}
-static int esp_http_client_write(void *h,const char *body,int n) {(void)body;assert(h);writes++;if(partial)return writes==1?3:-1;return n;}
+static int esp_http_client_open(void *h,int n) {assert(h&&n==expected_length);opens++;return open_fail?-1:ESP_OK;}
+static int esp_http_client_write(void *h,const char *body,int n) {
+    assert(h&&n>0&&n<=1024);if(expected_body)assert(body==expected_body+accepted_bytes);
+    if(n>max_write)max_write=n;writes++;
+    int accepted=partial?(writes==1?3:-1):n;
+    if(accepted>0)accepted_bytes+=accepted;
+    return accepted;
+}
 static int esp_http_client_fetch_headers(void *h) {assert(h);return 2;}
 static int esp_http_client_read(void *h,char *out,int n) {assert(h&&n>2);if(reads++)return 0;memcpy(out,"{}",2);return 2;}
 static bool esp_http_client_is_complete_data_received(void *h) {assert(h);return !incomplete;}
@@ -45,7 +53,7 @@ static void *test_malloc(size_t n) {return alloc_fail?NULL:malloc(n);}
 #define malloc test_malloc
 #include "production_http.inc"
 #undef malloc
-static void reset(void) {setup_calls=fail_at=opens=writes=cleanups=closes=reads=0;init_fail=alloc_fail=partial=open_fail=incomplete=false;last_log[0]=0;}
+static void reset(void) {setup_calls=fail_at=opens=writes=cleanups=closes=reads=0;max_write=accepted_bytes=0;expected_length=6;expected_body=NULL;init_fail=alloc_fail=partial=open_fail=incomplete=false;last_log[0]=0;}
 static int upload_test(void) {return http(UPLOAD_URL,"abcdef",6,"application/octet-stream",true,"private-api-arg");}
 int main(void) {
     for(int step=1;step<=4;step++) {
@@ -63,5 +71,11 @@ int main(void) {
     reset();assert(http("https://api.dropboxapi.com/2/files/get_metadata","abcdef",6,"application/json",true,NULL)==200);assert(strstr(last_log,"op=metadata"));
     reset();assert(http(TOKEN_URL,"abcdef",6,"application/x-www-form-urlencoded",false,NULL)==200);assert(strstr(last_log,"op=token")&&!strstr(last_log,"secret-value"));
     puts("PASS production HTTP success distinguishes token/upload/metadata operations");
+    reset();char large[46797];memset(large,'x',sizeof large);
+    expected_length=sizeof large;expected_body=large;
+    assert(http(UPLOAD_URL,large,sizeof large,"application/octet-stream",true,"private-api-arg")==200);
+    assert(accepted_bytes==sizeof large&&max_write==1024&&writes==46);
+    assert(strstr(last_log,"request_bytes=46797 sent_bytes=46797"));
+    puts("PASS 46797-byte CSV uses bounded 1024-byte writes with exact byte ordering and accounting");
     return 0;
 }
