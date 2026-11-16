@@ -135,7 +135,10 @@ python3 -m unittest discover -s tools -v
 ```
 
 Tests require a C compiler. The native AES harness uses macOS CommonCrypto;
-device firmware uses ESP-IDF mbedTLS. Build outputs, downloaded drivers, and local
+device firmware uses ESP-IDF mbedTLS. The Dropbox fault-injection test also uses
+cJSON and portable mbedTLS sources from an ESP-IDF checkout: set `IDF_PATH` to run
+it (it reports an explicit skip if unavailable). Release verification should run
+that test without skipping. Build outputs, downloaded drivers, and local
 captures are excluded from version control.
 
 ## Dropbox setup
@@ -161,11 +164,37 @@ TLS uses PSRAM (`CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y`) so BLE, the display and
 speaker DMA do not leave it without a large enough internal RAM block. For an
 existing build directory, select **External SPIRAM** under **Component config →
 mbedTLS → Memory allocation strategy** in `idf.py menuconfig`; changing defaults
-alone does not override a previously generated `sdkconfig`.
+alone does not override a previously generated `sdkconfig`. Also apply these
+settings to existing generated configurations (all are in the defaults):
+
+- `CONFIG_MBEDTLS_HARDWARE_AES` disabled: its internal DMA bounce buffers can
+  fail even with TLS allocated in PSRAM; software AES avoids that dependency.
+- `CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y` to offload network allocations.
+- Static Wi-Fi TX buffers enabled, **4** buffers
+  (`CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=4`). Enabling network PSRAM allocation
+  selects a static pool; its default 16 buffers consumed nearly all remaining
+  internal RAM on this watch. Do not enable that option alone.
 
 Serial diagnostics: `dropbox status` reads the saved connection state;
 `dropbox check` refreshes authorization and uploads the existing
 `connection-check.json` test file, validating its returned content hash. Neither
 command erases credentials. Logs include HTTP status, request/response sizes and
 available TLS memory, never token response bodies or authorization headers.
+HTTPS bodies are sent in at most 1 KiB writes, independently of the software-AES
+configuration. A single large write with hardware AES previously failed despite
+a successful small connection check. Logs also distinguish received HTTP status,
+header-fetch failure and incomplete bodies rather than conflating all failures.
 A passed connection check does not replace full brew/trace/TDS upload testing.
+`dropbox test` exercises a synthetic 2,000-sample dual-scale CSV, draft JSON and
+final JSON through the real worker, using labelled `/connection-check-*` files
+and restoring the live brew's bookkeeping afterwards.
+
+Failed drafts retain their trace in RAM so the same brew's later complete result
+can recover after a transient failure. Metadata hash/revision checks reconcile
+partial uploads without blindly overwriting files. `record status` prints the
+current error; the result screen also shows it rather than only `save failed`.
+
+Before uploading, summaries of the newest eight brews are backed up to NVS;
+`record backups` exports them after a reboot. **Summaries do not preserve raw
+curves, do not imply Dropbox success, and are not automatically re-uploaded.**
+The full trace recovery slot is still volatile. See [Brew records](spec/brew-record.md).

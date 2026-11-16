@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "ui.h"
 #include "audio.h"
+#include "brew_backup.h"
 #include "design.h"
 #include "probe_trace.h"
 #include "color_mode.h"
@@ -18,6 +19,7 @@
 #include <cstdio>
 #include <cstring>
 #include <cmath>
+#include <sys/time.h>
 static QueueHandle_t events,console_commands;
 static cw_flow_t flow;
 static UiState ui;
@@ -204,13 +206,19 @@ static void input_tick(BoardInput raw,int64_t now) {
 static unsigned aux_count;static int64_t aux_first_us,aux_last_us,aux_max_gap_us;
 // Scale and probe-clock transitions must publish the same draft/trace and start
 // RS discovery. In particular, a held CK811 reading can end on a probe tick.
+static void backup_record(const cw_brew_record_t &record) {
+    struct timeval wall;gettimeofday(&wall,nullptr);
+    int64_t utc=wall.tv_sec>1735689600?((int64_t)wall.tv_sec*1000000+wall.tv_usec-now_us()+record.captured_us)/1000000:0;
+    if(!brew_backup_save(&record,utc))ESP_LOGW("record","local summary backup failed; id=%s revision=%u",record.id,record.revision);
+}
 static void flow_follow(cw_stage_t before,int64_t us,bool record_event) {
     trace_follow(us);
     if(record_event) {
         cw_brew_record_t record;
         if(cw_record_event(&records,before,&flow,us,&record)) {
             cw_record_status_t pending={};pending.state=CW_RECORD_SAVING;pending.revision=record.revision;snprintf(pending.id,sizeof pending.id,"%s",record.id);ui.record=pending;ui.record_visible=true;
-            dropbox_setup_record(&record,record.revision==1?probe_trace_snapshot():nullptr);
+            backup_record(record);
+            dropbox_setup_record(&record,!record.complete?probe_trace_snapshot():nullptr);
         }
     }
     if(flow.stage==CW_TDS&&!rs_requested) {rs_requested=true;transport_find_rs();}
@@ -352,9 +360,17 @@ extern "C" void app_main() {
             else if(!strcmp(cmd.line,"dropbox status")) {
                 char json[384];if(dropbox_setup_status(json,sizeof json)>0)printf("DROPBOX %s\n",json);
             }
-            else if(!strcmp(cmd.line,"dropbox check")) {
-                cw_dropbox_command_t check={};check.op=3;
+            else if(!strcmp(cmd.line,"dropbox check")||!strcmp(cmd.line,"dropbox test")) {
+                cw_dropbox_command_t check={};check.op=!strcmp(cmd.line,"dropbox test")?4:3;
                 puts(dropbox_setup_submit(&check)?"DROPBOX check queued":"DROPBOX busy");
+            }
+            else if(!strcmp(cmd.line,"record status")) {
+                printf("RECORD state=%u revision=%u id=%s path=%s error=%s\n",ui.record.state,ui.record.revision,ui.record.id,ui.record.path,ui.record.error);
+            }
+            else if(!strcmp(cmd.line,"record backups")) {
+                char json[2048];unsigned count=0;
+                for(unsigned i=0;i<8;i++)if(brew_backup_json(i,json,sizeof json)>0) {printf("BACKUP %s\n",json);count++;}
+                printf("BACKUPS count=%u trace_samples_persisted=false\n",count);
             }
             else if(!strcmp(cmd.line,"mode"))printf("MODE %s sensor=%u scale=%u\n",app.mode==CW_APP_HOME?"home":app.mode==CW_APP_BREW?"brew":"color",app.sensor_present,flow.scale_ready);
             else if(!strcmp(cmd.line,"netstatus"))printf("NETWORK state=%u setup=%u paired=%u saved=%u reason=%d setup_error=%d\n",ui.network.state,ui.network.setup_active,ui.network.paired,ui.network.saved,ui.network.reason,ui.network.setup_error);

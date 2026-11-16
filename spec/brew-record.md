@@ -2,7 +2,8 @@
 
 A record is generated from two accepted sensor transitions:
 
-1. **Beverage → Waiting TDS**: the confirmed beverage weight creates a JSON
+1. **Beverage → Waiting TDS** (or **Brew → Waiting TDS** after a confirmed
+   dual-scale dripper lift): the confirmed beverage weight creates a JSON
    record in the watch's Dropbox app folder, preceded by the brew's 10 Hz probe
    trace CSV (see [Probe trace](#probe-trace)). Its status is
    `awaiting_tds`; TDS, extraction, sample temperature and refractive index are
@@ -28,14 +29,20 @@ replace the status of a newer revision or a newer brew on the watch.
 
 For each upload, the worker loads the saved authorization, synchronizes the
 clock if necessary and exchanges the refresh token for an access token.
-Revision 1 uploads `/brew-<record-id>.json` with mode `add` and no autorename, so
-an existing file is a conflict rather than a silent replacement. The worker
-retains the returned `rev` and the record's UTC timestamp; later revisions use
-mode `update` with that exact `rev`, so a file changed elsewhere is reported as
-`record_changed_elsewhere` instead of being overwritten. There is no filename
-search, status polling or alternate creation route for a missing draft. Every
-upload is accepted only when Dropbox's `content_hash` of the stored file equals
-the watch's own. The connection-check file is never used as a brew record.
+The worker retains a recovery slot before the first network action, including
+its record identity, original capture time and owned trace snapshot. A later
+complete result can therefore create `/brew-<record-id>.json` if the first draft
+failed before creation; it is not blocked solely because revision 1 failed.
+
+Before each write, `files/get_metadata` checks the exact path. A positively absent
+file is created with mode `add` and no autorename. Byte-identical existing content
+can be adopted after hash verification; an update requires the exact hash and
+`rev` previously written by this watch. Unrelated changes, deleted owned files,
+missing metadata scope and unknown remote state stop the write. A lost upload
+response gets a metadata readback, not an automatic write replay. Subsequent
+accepted sensor events can reconcile the retained pending hash and continue.
+Every saved result must match Dropbox's content hash and path. The diagnostic
+connection-check files are never used as actual brew records.
 
 Accepted record events for one brew precede all events of the next brew, and
 the FIFO worker preserves that order. The retained binding is replaced only by
@@ -47,13 +54,22 @@ to UTC after clock synchronization. It is retained with the `rev` and reused
 unchanged by subsequent revisions. Dropbox's own server-modified time also
 remains available.
 
-Only a successful upload whose content hash matches reports **Dropbox: saved**. The UI shows saving/saved/save-failed on Waiting TDS and the
-report/chart. Network work never blocks sensor processing or the user interface.
-Missing authorization, network, lookup, create, PATCH and read-back failures are
-explicit. There is no automatic retry, periodic sync check, offline replay or
-alternate storage/upload path. Brew measurements remain available in the local
-workflow when an upload fails. A reboot resets that workflow; already-created
-Dropbox drafts remain in Dropbox even if TDS was never measured.
+Only a verified matching remote file reports **Dropbox: saved**. Waiting TDS and
+the report/chart display the actual error code when saving fails. Network work
+runs in the worker rather than blocking sensor processing. There is no periodic
+retry or automatic replay after reboot. The full trace recovery slot remains
+volatile and is replaced by a new brew/color group or authorization change.
+Already-created Dropbox files remain in Dropbox across reboots.
+
+Before enqueueing each accepted record event, the watch also saves a summary of
+the newest eight distinct brews in the existing NVS partition, in a separate
+`cw_brew_backup` namespace. Higher revisions update the same summary. Two banks
+and a committed selection protect the previous summary against a failed write;
+space/commit errors are reported without erasing any namespace. These summaries
+survive reboot but **do not contain raw curve samples and are not a durable
+upload queue**. `record backups` exports them as clearly labelled local-backup
+JSON; unknown UTC is null, and `trace_samples_persisted` is false. Backup success
+is not Dropbox success, and backups are not automatically uploaded.
 
 ## Probe trace
 
@@ -87,8 +103,12 @@ temperature has two decimals. Missing values are empty fields. Upload is
 verified by comparing Dropbox's `content_hash` with the local CSV, then the
 record JSON references its path. A failed trace upload fails the draft; no
 record is created without the trace it describes. A record whose creation fails
-after the trace upload can leave that CSV in the folder. Later revisions repeat
-the same `probe_trace` object and do not upload the CSV again.
+after the trace upload can leave that CSV in the folder. The retained trace lets
+later accepted revisions reconcile that partial upload by hash rather than
+blindly submitting the same CSV again. A resumed brew supplies a newer snapshot;
+its CSV is updated only through the same hash/revision guard, and the JSON then
+references the updated sample count. A normal TDS completion reuses the unchanged
+trace. Full curve retention does not survive reboot.
 
 ## Schema v3
 
