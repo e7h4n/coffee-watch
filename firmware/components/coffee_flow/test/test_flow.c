@@ -54,6 +54,68 @@ static void brew(cw_flow_t *f) {
     ticks(f,70000,85.f,30);assert(f->stage==CW_BREW&&f->level_valid);
     ticks(f,37000,80.f,11);assert(f->stage==CW_BEVERAGE&&f->result_valid);
 }
+
+// Two scales: BOOKOO (epoch 7) under the server, the second scale (epoch 9) under the stand.
+static void dtick(cw_flow_t *f,int32_t cup,int32_t total,float celsius) {
+    weight(f,cup,7);cw_probe_message(f,!isnan(celsius),celsius,us+1);cw_aux_weight(f,9,total,us+50000);
+}
+static void dticks(cw_flow_t *f,int32_t cup,int32_t total,float celsius,unsigned n) {for(unsigned i=0;i<n;i++)dtick(f,cup,total,celsius);}
+static void dose(cw_flow_t *f) {bookoo_message_t m={.kind=BOOKOO_DOSE,.dose_cg=1500};cw_scale_message(f,7,&m,us+1);}
+// Pour 230 g at 10 g/s onto the stand, steep, then drain 190 g into the server.
+static void dual_brew(cw_flow_t *f) {
+    for(int i=1;i<=23;i++)dtick(f,40000,250000+i*1000,i<3?20.f:90.f);
+    assert(f->stage==CW_BREW&&f->dual&&f->duo.total==1&&cw_brew_water(f)==23000);
+    dticks(f,40000,273000,85.f,100);assert(f->stage==CW_BREW);       // steep: nothing ends it
+    for(int i=1;i<=95;i++)dtick(f,40000+i*200,273000,82.f);          // drain at 2 g/s
+    dticks(f,59000,273000,80.f,30);assert(f->stage==CW_BREW);       // still settling
+    dticks(f,59000,273000,80.f,40);
+}
+static int dual_scenarios(void) {
+    int n=0;cw_flow_t f;uint8_t p[6];
+    // Second scale already there: no empty server, Ready once the dose is known.
+    cw_init(&f);cw_aux_link(&f,true,9);cw_scale_link(&f,true,7);cw_choose(&f,CW_SWITCH);
+    assert(f.dual&&f.stage==CW_EMPTY);initialize_mode(&f,0);assert(f.stage==CW_PREP);
+    dose(&f);assert(f.stage==CW_READY);dticks(&f,40000,250000,20.f,40);
+    dual_brew(&f);
+    assert(f.stage==CW_TDS&&f.beverage_valid&&f.beverage_cg==19000&&f.result.water_cg==23000);
+    assert(f.result.elapsed_ms>11000&&f.duo.open_valid);
+    // Late drips raise the beverage; pouring again resumes the brew.
+    dticks(&f,19100+40000,273000,80.f,5);assert(f.beverage_cg==19100);
+    dticks(&f,59100,276000,80.f,8);assert(f.stage==CW_BREW&&!f.result_valid);
+    dticks(&f,59100,276000,80.f,60);assert(f.stage==CW_TDS&&f.result.water_cg==26000);
+    rs_event_t r={.kind=RS_MEASUREMENT,.tds_percent=1.4f};cw_rs_link(&f,true);cw_rs_message(&f,&r,us+1);
+    assert(f.stage==CW_REPORT&&fabsf(f.retention-(26000-19100)/1500.f)<.001f);
+    n++;
+    // The second scale arriving during empty-server capture switches to two scales.
+    us+=1000000;cw_home(&f);cw_aux_link(&f,false,9);cw_choose(&f,CW_V60);assert(!f.dual);initialize_mode(&f,0);
+    weights(&f,10000,20);assert(f.stage==CW_EMPTY);
+    cw_aux_link(&f,true,10);assert(f.dual&&f.stage==CW_READY); // dose known from before
+    n++;
+    // Single Ready, then the second scale: Ready again with two scales.
+    cw_aux_link(&f,false,10);assert(!f.dual&&f.stage==CW_BREWER&&!f.interrupted);
+    cw_choose(&f,CW_V60);initialize_mode(&f,0);weights(&f,10000,51);assert(f.stage==CW_READY&&!f.dual);
+    cw_aux_link(&f,true,11);assert(f.dual&&f.stage==CW_READY);
+    n++;
+    // Losing a scale before the pour restarts at the carousel; the scale alone as well.
+    cw_scale_link(&f,false,7);assert(f.stage==CW_BREWER&&!f.interrupted&&!f.dual&&!f.scale_ready);
+    // A new connection reads the stored dose again.
+    cw_scale_link(&f,true,7);cw_aux_link(&f,false,11);cw_choose(&f,CW_V60);initialize_mode(&f,0);
+    weights(&f,10000,51);assert(f.stage==CW_PREP);dose(&f);assert(f.stage==CW_READY);
+    cw_scale_link(&f,false,7);assert(f.stage==CW_BREWER&&!f.interrupted);
+    n++;
+    // Losing either scale during a two-scale brew interrupts it.
+    cw_scale_link(&f,true,7);cw_aux_link(&f,true,12);cw_choose(&f,CW_SWITCH);initialize_mode(&f,0);
+    dose(&f);assert(f.stage==CW_READY);
+    for(int i=0;i<40;i++) {weight(&f,40000,7);cw_probe_message(&f,true,20.f,us+1);cw_aux_weight(&f,12,250000,us+50000);}
+    for(int i=1;i<=10;i++) {weight(&f,40000,7);cw_probe_message(&f,true,i<3?20.f:90.f,us+1);cw_aux_weight(&f,12,250000+i*1000,us+50000);}
+    assert(f.stage==CW_BREW);cw_aux_link(&f,false,12);assert(f.interrupted&&!strcmp(f.error,"Second scale disconnected"));
+    n++;
+    // Back from a two-scale Ready returns to the carousel; no write is pending.
+    cw_home(&f);cw_aux_link(&f,true,13);cw_choose(&f,CW_V60);initialize_mode(&f,0);assert(f.stage==CW_READY);
+    cw_back(&f);assert(f.stage==CW_BREWER&&!cw_initial_request(&f,p));
+    n++;
+    return n;
+}
 int main(void) {
     cw_flow_t f;
     // Full flow: watch-owned start, zero, lift and beverage; no Auto command at all.
@@ -174,5 +236,6 @@ int main(void) {
     assert(cw_brewer_immersion(CW_SWITCH)&&cw_brewer_immersion(CW_AEROPRESS)&&!cw_brewer_immersion(CW_V60)&&!cw_brewer_immersion(CW_HOOP));
     brewer=CW_HOOP;brew(&f);cw_back(&f);cw_back(&f);cw_back(&f);cw_back(&f);
     assert(f.stage==CW_BREWER&&f.brewer==CW_HOOP);cw_home(&f);assert(f.brewer==CW_HOOP);
-    puts("20 full-flow scenarios passed");
+    int dual=dual_scenarios();assert(dual==6);
+    puts("26 full-flow scenarios passed");
 }

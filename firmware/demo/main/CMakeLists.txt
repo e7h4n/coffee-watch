@@ -1,2 +1,2 @@
 idf_component_register(SRCS "main.cpp" "board.cpp" "ui.cpp" "transport.c" "wifi_setup.c" "dropbox_setup.c" "probe_trace.c" "color_sensor.c" "color_mode.cpp"
- INCLUDE_DIRS "." REQUIRES bt nvs_flash esp_timer M5GFX M5PM1 M5IOE1 bookoo difluid_rs coffee_flow mbedtls esp_wifi esp_event esp_netif wifi_config dropbox_config esp_http_client json brew_record brew_trace esp_adc driver max30101 roast_color app_mode)
+ INCLUDE_DIRS "." REQUIRES bt nvs_flash esp_timer M5GFX M5PM1 M5IOE1 bookoo difluid_rs coffee_flow mbedtls esp_wifi esp_event esp_netif wifi_config dropbox_config esp_http_client json brew_record brew_trace esp_adc driver max30101 roast_color app_mode ck811)

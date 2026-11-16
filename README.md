@@ -39,6 +39,11 @@ shared by both.
    every 5 seconds; swipe or press Next to turn them yourself. The watch starts
    the next brew on the brewer you used last.
 
+With the BOOKOO and a Lefu CK811 both connected, steps 2 and 4 disappear: no empty
+server and no lifting, the watch tells the two scales apart, measures the beverage and
+the drip flow directly and ends the brew when the dripper has drained. See
+[Two-scale brewing](spec/two-scales.md).
+
 Mass and volume use one decimal place. V60 and Hoop use the measured beverage
 mass:
 
@@ -67,6 +72,7 @@ this interval.
 | M5Stack StopWatch | Interaction, device connections, and reports | ESP32-S3 |
 | BOOKOO Themis Ultra | Coffee dose and weight | Firmware 4.0.1, Ratio mode (Auto not used) |
 | DiFluid RS | TDS measurement | Firmware v002-005 |
+| Lefu CK811 | Second scale for two-scale brewing (total or cup) | 5 kg / 0.1 g; protocol from the open-source Pourista driver, not yet validated here |
 | Bed probe | Brew start and temperature trace | 100 kΩ B3950 NTC on G8, G9 = 3V3/2 reference |
 | SparkFun SEN-16474 (MAX30101) | Roast color mode, on the RoastWatch adapter | G5 = SDA, G6 = SCL; not yet validated on hardware |
 
@@ -113,6 +119,7 @@ building, and flashing.
 - [Visual system and shared components](spec/design.md)
 - [Product behavior and interactions](spec/product.md)
 - [Roast color mode](spec/colorimeter.md)
+- [Two-scale brewing](spec/two-scales.md)
 - [Wi-Fi setup and provisioning](spec/wifi.md)
 - [Bluetooth interfaces](spec/bluetooth.md)
 - [Acceptance checklist](spec/acceptance.md)

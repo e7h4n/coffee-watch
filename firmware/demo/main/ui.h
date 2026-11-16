@@ -2,7 +2,9 @@
 #include "board.h"
 #include "demo.h"
 // Home (the app chooser) is drawn from these; set every frame by the main loop.
-struct UiState {bool home=false,home_scale=false,home_color=false;bool wifi_setup=false;cw_network_view_t network={};cw_record_status_t record={};bool record_visible=false;int battery_percent=-1;int held=0;int carousel_dir=0;unsigned carousel_from=0;float carousel_progress=0;
+// Two-scale brewing, display only: the cup scale's beverage and drip (out) flow.
+struct DualView {bool active=false;int scales=1;bool out_valid=false;float out_gps=0;int32_t out_cg=0;bool open_valid=false;uint32_t open_ms=0;};
+struct UiState {bool home=false,home_scale=false,home_color=false;char home_scales[24]={};DualView dual;bool wifi_setup=false;cw_network_view_t network={};cw_record_status_t record={};bool record_visible=false;int battery_percent=-1;int held=0;int carousel_dir=0;unsigned carousel_from=0;float carousel_progress=0;
     // Result pages (Waiting TDS / Report). Display-only: turning pages never changes flow.
     int result_page=0;int64_t page_us=0;};
 // Waiting TDS: summary, curve. Report: report, TDS/extraction chart, curve.

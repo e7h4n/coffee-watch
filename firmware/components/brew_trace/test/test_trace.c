@@ -22,9 +22,9 @@ int main(void) {
     assert(cw_trace_append(&t,1300000,1234,CW_TRACE_NO_PROBE));
     assert(cw_trace_append(&t,1400000,-56,-150));
     assert(!cw_trace_append(&t,1500000,0,0)&&t.truncated&&t.count==4);
-    char csv[512];int n=cw_trace_csv(t.samples,t.count,t.brew_ms,csv,sizeof csv);assert(n>0&&(size_t)n==strlen(csv));
+    char csv[512];int n=cw_trace_csv(t.samples,t.count,t.brew_ms,false,csv,sizeof csv);assert(n>0&&(size_t)n==strlen(csv));
     assert(!strcmp(csv,"t_ms,weight_g,probe_c\n-250,0.0,22.10\n-150,,22.15\n50,12.3,\n150,-0.6,-1.50\n"));
-    assert(cw_trace_csv(t.samples,t.count,t.brew_ms,csv,40)<0);
+    assert(cw_trace_csv(t.samples,t.count,t.brew_ms,false,csv,40)<0);
     assert((size_t)n<cw_trace_csv_bound(t.count));
     cw_trace_stop(&t);assert(!cw_trace_append(&t,1600000,0,0));
     cw_trace_start(&t,2000000);assert(t.count==0&&!t.truncated&&!t.brew_started);
@@ -52,6 +52,19 @@ int main(void) {
     cw_trace_brew(&t,299900000,40000);assert(t.brew_ms==t.samples[t.count-1].t_ms);
     for(int i=0;i<300;i++)cw_trace_append(&t,300000000+(int64_t)i*100000,40000+i,2000);
     assert(t.count>2*CW_TRACE_PREROLL&&cw_trace_elapsed_ms(&t)==30000);
+    // Two scales: BOOKOO under the server, the second scale under the stand (total).
+    cw_trace_sample_t two[16];cw_trace_init(&t,two,16);cw_trace_start(&t,0);
+    cw_trace_append_aux(&t,0,40000,250000,2000);
+    const int32_t zeros[2]={40000,250000};cw_trace_brew_dual(&t,100000,zeros,1);
+    cw_trace_append_aux(&t,100000,40000,251000,9000);cw_trace_append_aux(&t,200000,40150,262000,8950);
+    assert(t.dual&&cw_trace_water(&t,&t.samples[2])==12000&&cw_trace_out(&t,&t.samples[2])==150);
+    int32_t outs[4];assert(cw_trace_out_series(&t,400,4,outs)==2&&outs[0]==0&&outs[1]==150);
+    cw_trace_roles(&t,0);assert(cw_trace_water(&t,&t.samples[2])==150);cw_trace_roles(&t,1);
+    cw_trace_stop(&t);assert(!cw_trace_append_aux(&t,300000,1,1,1));cw_trace_resume(&t);assert(cw_trace_append_aux(&t,300000,40300,262000,8900));
+    // A snapshot holds water and beverage; its CSV adds out_g.
+    cw_trace_sample_t snap[2]={{0,0,0,9000},{100,12000,150,8950}};
+    char two_csv[128];assert(cw_trace_csv(snap,2,0,true,two_csv,sizeof two_csv)>0);
+    assert(!strcmp(two_csv,"t_ms,weight_g,probe_c,out_g\n0,0.0,90.00,0.0\n100,120.0,89.50,1.5\n"));
     fputs(csv,stdout);puts("trace tests passed");
     return 0;
 }

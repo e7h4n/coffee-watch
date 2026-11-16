@@ -19,10 +19,12 @@
 #define CW_PROBE_R_PULLUP 10000.0
 #define CW_PROBE_R25 100000.0
 #define CW_PROBE_BETA 3950.0
-typedef struct {uint32_t t_ms;int32_t weight_cg;int16_t probe_cc;} cw_trace_sample_t;
+// weight_cg is BOOKOO; aux_cg the second scale (CW_TRACE_NO_WEIGHT with one scale).
+typedef struct {uint32_t t_ms;int32_t weight_cg,aux_cg;int16_t probe_cc;} cw_trace_sample_t;
 // Immutable copy of a finished trace, handed from the recorder to the Drive worker.
 // One allocation: samples points just past the struct, so free() releases both.
-typedef struct {size_t count;uint32_t brew_ms;bool truncated;cw_trace_sample_t *samples;} cw_trace_snapshot_t;
+// In a snapshot weight_cg is the added water and aux_cg the beverage (two scales only).
+typedef struct {size_t count;uint32_t brew_ms;bool truncated,dual;cw_trace_sample_t *samples;} cw_trace_snapshot_t;
 typedef struct {
     cw_trace_sample_t *samples;size_t capacity,count;
     bool active,brew_started,truncated;
@@ -30,6 +32,8 @@ typedef struct {
     // Samples keep the scale reading as received; the chart and the snapshot report
     // weight relative to the brew's zero (the stable weight before the pour).
     int32_t zero_cg;
+    // Two scales: each scale's zero and which one is the total (water) scale.
+    bool dual;unsigned total;int32_t zero[2];
 } cw_trace_t;
 // Probe temperature from the G8/G9 voltage ratio; NAN when open, shorted or out of range.
 double cw_probe_celsius(double ratio);
@@ -41,11 +45,21 @@ void cw_trace_init(cw_trace_t *t,cw_trace_sample_t *storage,size_t capacity);
 void cw_trace_start(cw_trace_t *t,int64_t us);
 void cw_trace_brew(cw_trace_t *t,int64_t us,int32_t zero_cg);
 void cw_trace_stop(cw_trace_t *t);
+// Two scales: zeros per scale (0 = BOOKOO, 1 = second scale) and the total scale.
+void cw_trace_brew_dual(cw_trace_t *t,int64_t us,const int32_t zero[2],unsigned total);
+void cw_trace_roles(cw_trace_t *t,unsigned total);
+// A two-scale brew that ended too early continues recording.
+void cw_trace_resume(cw_trace_t *t);
 bool cw_trace_append(cw_trace_t *t,int64_t us,int32_t weight_cg,int16_t probe_cc);
+bool cw_trace_append_aux(cw_trace_t *t,int64_t us,int32_t weight_cg,int32_t aux_cg,int16_t probe_cc);
+// Added water and beverage of a sample relative to the brew's zeros (beverage only with two scales).
+int32_t cw_trace_water(const cw_trace_t *t,const cw_trace_sample_t *s);
+int32_t cw_trace_out(const cw_trace_t *t,const cw_trace_sample_t *s);
 // CSV with t_ms relative to the brew start (negative before the pour), weight in
 // grams with one decimal and probe temperature in degrees C with two decimals.
 // Missing values are empty fields. Returns the length, or -1 if it does not fit.
-int cw_trace_csv(const cw_trace_sample_t *samples,size_t count,uint32_t brew_ms,char *out,size_t capacity);
+// Two scales add an out_g column with the beverage.
+int cw_trace_csv(const cw_trace_sample_t *samples,size_t count,uint32_t brew_ms,bool dual,char *out,size_t capacity);
 size_t cw_trace_csv_bound(size_t count);
 // Brew-screen chart. The time axis shows 2:30, then 4:00, 6:00 and further
 // whole two-minute steps, so the curve compresses instead of scrolling.
@@ -54,5 +68,7 @@ uint32_t cw_trace_span_ms(uint32_t elapsed_ms);
 // after the brew start. Columns without a sample stay missing. Returns the
 // number of columns up to the newest sample (0 before the brew start).
 size_t cw_trace_series(const cw_trace_t *t,uint32_t span_ms,size_t columns,int16_t *probe_cc,int32_t *weight_cg);
+// Beverage on the same columns; 0 with one scale.
+size_t cw_trace_out_series(const cw_trace_t *t,uint32_t span_ms,size_t columns,int32_t *out_cg);
 // Milliseconds from the brew start to the newest sample, or 0.
 uint32_t cw_trace_elapsed_ms(const cw_trace_t *t);

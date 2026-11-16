@@ -43,6 +43,12 @@
       watch shows `Dropbox: saved`.
 - [ ] Baking-soda calibration ends near 230 (within one LED step), survives a reboot, and Cancel or a
       failure keeps the previous LED level.
+- [ ] With BOOKOO and CK811 connected, choosing a brewer goes to Ready without an
+      empty server; connecting the CK811 during empty-server capture does the same.
+- [ ] Losing a scale before the pour returns to the carousel (Home with none left).
+- [ ] Two-scale Switch: the steep never ends the brew, Out shows the drain and the
+      brew ends by itself when dripping stops; pouring again before the TDS resumes it.
+- [ ] Two-scale trace CSV has `out_g`; the record has `scales: 2` and the drain start.
 
 Automated checks run with `python3 -m unittest discover -s tools -v`.
 Physical checks are a checklist, not an assertion that every release passed them.
