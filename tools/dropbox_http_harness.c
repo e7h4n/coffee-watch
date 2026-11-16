@@ -32,7 +32,11 @@ static const char *esp_err_to_name(int e) {return e==ESP_OK?"OK":"NO_MEM";}
 static size_t heap_caps_get_free_size(int caps) {(void)caps;return 10000;}
 static size_t heap_caps_get_largest_free_block(int caps) {(void)caps;return 5000;}
 static int64_t esp_timer_get_time(void) {return 1000;}
-static esp_http_client_handle_t esp_http_client_init(const esp_http_client_config_t *c) {assert(c->disable_auto_redirect);return init_fail?NULL:(void*)1;}
+static esp_http_client_handle_t esp_http_client_init(const esp_http_client_config_t *c) {
+    assert(c->disable_auto_redirect);
+    assert(c->timeout_ms==(!strcmp(c->url,"https://api.dropboxapi.com/2/files/get_metadata")?45000:15000));
+    return init_fail?NULL:(void*)1;
+}
 static int esp_http_client_set_method(void *h,int method) {assert(h&&method==HTTP_METHOD_POST);return ++setup_calls==fail_at?ESP_ERR_NO_MEM:ESP_OK;}
 static int esp_http_client_set_header(void *h,const char *key,const char *value) {assert(h&&key&&value);return ++setup_calls==fail_at?ESP_ERR_NO_MEM:ESP_OK;}
 static int esp_http_client_open(void *h,int n) {assert(h&&n==expected_length);opens++;return open_fail?-1:ESP_OK;}

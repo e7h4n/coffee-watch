@@ -85,7 +85,10 @@ static bool clock_ready(void) {
 }
 static int http(const char *url,const char *body,size_t length,const char *type,bool authorized,const char *api_arg) {
     mbedtls_platform_zeroize(response,sizeof response);
-    esp_http_client_config_t cfg={.url=url,.timeout_ms=15000,.crt_bundle_attach=esp_crt_bundle_attach,.disable_auto_redirect=true,.buffer_size=2048,.buffer_size_tx=4096};
+    // Allow slow read-only metadata responses more time, without
+    // replaying any write on a timeout.
+    int timeout=!strcmp(url,"https://api.dropboxapi.com/2/files/get_metadata")?45000:15000;
+    esp_http_client_config_t cfg={.url=url,.timeout_ms=timeout,.crt_bundle_attach=esp_crt_bundle_attach,.disable_auto_redirect=true,.buffer_size=2048,.buffer_size_tx=4096};
     const char *op=!strcmp(url,TOKEN_URL)?"token":!strcmp(url,UPLOAD_URL)?"upload":"metadata";
     esp_http_client_handle_t h=esp_http_client_init(&cfg);
     if(!h) {ESP_LOGW("dropbox","http op=%s setup=init failed request_bytes=%u sent_bytes=0",op,(unsigned)length);return -1;}
