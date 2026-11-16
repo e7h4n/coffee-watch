@@ -87,7 +87,7 @@ int ui_result_pages(const cw_flow_t &s) {
 }
 bool ui_curve_page(const cw_flow_t &s,const UiState &u) {return (s.stage==CW_TDS&&u.result_page==1)||(s.stage==CW_REPORT&&u.result_page==2);}
 bool ui_tick(const cw_flow_t &s,const UiState &u,int64_t now) {
-    int page=s.interrupted?100:(!s.scale_ready&&s.stage!=CW_TDS&&s.stage!=CW_REPORT?101:(int)s.stage*4+u.result_page);
+    int page=u.home?102:s.interrupted?100:(!s.scale_ready&&s.stage!=CW_TDS&&s.stage!=CW_REPORT?101:(int)s.stage*4+u.result_page);
     if(page!=previous_page) {previous_page=page;entered_us=now;have_value=false;}
     enter=std::clamp((now-entered_us)/(float)design::motion::enter_us,0.f,1.f);
     enter=1-std::pow(1-enter,3);
@@ -129,6 +129,7 @@ static void stability_bar(float progress) {
     }
 }
 bool ui_enabled(const cw_flow_t &s,int action,const UiState *u) {
+    if(u&&u->home&&!u->wifi_setup)return action==UI_HOME_WIFI||(action==UI_HOME_BREW&&u->home_scale)||(action==UI_HOME_COLOR&&u->home_color);
     if((u&&u->wifi_setup)||s.stage==CW_HOME||(!s.scale_ready&&s.stage==CW_BREWER))return action==1;
     if(s.interrupted||!s.scale_ready)return false;
     if(action==1) {
@@ -142,6 +143,10 @@ bool ui_enabled(const cw_flow_t &s,int action,const UiState *u) {
 }
 int ui_hit(const cw_flow_t &s,int x,int y,const UiState *u) {
     if((x-234)*(x-234)+(y-233)*(y-233)>233*233)return 0;
+    if(u&&u->home&&!u->wifi_setup) {
+        int hit=y>=design::button_top?UI_HOME_WIFI:(x>=74&&x<394&&y>=160&&y<232)?UI_HOME_BREW:(x>=74&&x<394&&y>=248&&y<320)?UI_HOME_COLOR:0;
+        return hit&&ui_enabled(s,hit,u)?hit:0;
+    }
     return y>=design::button_top&&ui_enabled(s,1,u)?1:0;
 }
 // Probe temperature curve since the pour, with the added-water steps behind it.
@@ -209,9 +214,8 @@ static void highlights(const cw_flow_t &s,int y) {
     text("TDS",150,y,design::type::label,MUTED);text("Extraction",318,y,design::type::label,MUTED);
     fmt(150,y+42,design::type::result,ACCENT,"%.2f%%",(double)s.tds);fmt(318,y+42,design::type::result,ACCENT,"%.2f%%",(double)s.extraction);
 }
-void ui_draw(const cw_flow_t &s,const UiState &u) {
-    c=&board_canvas();c->fillScreen(BG);
-    // Fixed top-center telemetry, outside page-entry motion.
+// Fixed top-center telemetry, outside page-entry motion.
+static void battery(const UiState &u) {
     float page_enter=enter;enter=1;
     uint32_t battery_color=u.battery_percent>=0&&u.battery_percent<=15?ACCENT:MUTED;
     c->drawRoundRect(195,24,28,14,3,battery_color);c->fillRect(224,28,3,6,battery_color);
@@ -219,6 +223,10 @@ void ui_draw(const cw_flow_t &s,const UiState &u) {
     if(u.battery_percent>=0)fmt(254,31,20,battery_color,"%d%%",u.battery_percent);
     else text("--%",254,31,20,battery_color);
     enter=page_enter;
+}
+void ui_draw(const cw_flow_t &s,const UiState &u) {
+    c=&board_canvas();c->fillScreen(BG);
+    battery(u);
     if(!u.wifi_setup&&u.record_visible&&(s.stage==CW_TDS||s.stage==CW_REPORT)) {
         const char *label=u.record.state==CW_RECORD_SAVING?"Dropbox: saving":u.record.state==CW_RECORD_SAVED?"Dropbox: saved":"Dropbox: save failed";
         text(label,234,438,16,u.record.state==CW_RECORD_SAVED?ACCENT:MUTED);
@@ -242,6 +250,22 @@ void ui_draw(const cw_flow_t &s,const UiState &u) {
             text(dropbox,234,354,18,MUTED);
         }
         bottom("Close",true,u.held==1);return;
+    }
+    if(u.home) {
+        // Home: the first device to connect picks the product; a connected one is also a choice.
+        text("Connect scale or color sensor",234,118,design::type::body,MUTED);
+        struct Tile {const char *label,*on,*off;bool enabled;int action,top;};
+        const Tile tiles[]={{"Brew","Scale connected","Searching for scale",u.home_scale,UI_HOME_BREW,160},
+                            {"Roast color","Color sensor attached","No color sensor",u.home_color,UI_HOME_COLOR,248}};
+        for(const Tile &t:tiles) {
+            bool held=t.enabled&&u.held==t.action;
+            if(t.enabled)c->fillSmoothRoundRect(74,t.top,320,72,18,held?ACCENT:BUTTON);
+            else c->drawRoundRect(74,t.top,320,72,18,LINE);
+            text(t.label,234,t.top+28,32,held?BG:(t.enabled?ACCENT:MUTED));
+            text(t.enabled?t.on:t.off,234,t.top+56,18,held?BG:MUTED);
+        }
+        if(s.error[0]&&!u.home_scale)text(s.error,234,338,16,MUTED);
+        bottom("Wi-Fi setup",true,u.held==UI_HOME_WIFI);return;
     }
     if(s.interrupted) {
         text("Brew interrupted",234,174,36);text(s.error[0]?s.error:"Scale disconnected",234,224,20,MUTED);
@@ -341,4 +365,97 @@ void ui_draw(const cw_flow_t &s,const UiState &u) {
         snprintf(b,sizeof b,"%.2fg/g",(double)s.retention);field("Retention",b,313,260,32);
         highlights(s,354);break;
     }
+}
+
+// Roast-color mode. The caption sits at y=124, the 90px index at y=214, the
+// readings of the current group at y=286, the stability or calibration bar at
+// y=306 and one status line at y=332, above the bottom action.
+const char *ui_color_action(const ColorView &v,bool *enabled) {
+    bool on=true;const char *label="Calibrate";
+    switch(v.page) {
+    case COLOR_WARMUP:case COLOR_NO_DATA:on=false;break;
+    case COLOR_CAL_PLACE:case COLOR_CAL_SETTLE:case COLOR_CAL_STEP:label="Cancel";break;
+    case COLOR_CAL_DONE:case COLOR_CAL_FAILED:label="Done";break;
+    default:break;
+    }
+    if(enabled)*enabled=on;
+    return label;
+}
+int ui_color_hit(const ColorView &v,int x,int y) {
+    bool on;ui_color_action(v,&on);
+    if((x-234)*(x-234)+(y-233)*(y-233)>233*233)return 0;
+    return y>=design::button_top&&on?1:0;
+}
+bool ui_color_tick(const ColorView &v,int64_t now) {
+    int page=200+(int)v.page;
+    if(page!=previous_page) {previous_page=page;entered_us=now;}
+    enter=std::clamp((now-entered_us)/(float)design::motion::enter_us,0.f,1.f);
+    enter=1-std::pow(1-enter,3);
+    return enter<1;
+}
+void ui_color_draw(const ColorView &v,const UiState &u) {
+    c=&board_canvas();c->fillScreen(BG);battery(u);
+    char b[48];
+    auto hero=[&](bool valid,float value,uint32_t color) {
+        if(valid)fmt(234,214,design::type::hero,color,"%.1f",(double)value);else text("--",234,214,design::type::hero,MUTED);
+    };
+    auto readings=[&]() {
+        int n=0;b[0]=0;
+        for(unsigned i=0;i<v.count&&i<3;i++)n+=snprintf(b+n,sizeof b-n,i?"   %.1f":"%.1f",(double)v.readings[i]);
+        // A single reading is already the hero value.
+        if(v.count>1||(v.count&&v.page==COLOR_MEASURING))text(b,234,286,design::type::body,MUTED);
+    };
+    auto calibration=[&]() {
+        if(v.calibrated) {snprintf(b,sizeof b,"Baking soda %.1f, LED %u",(double)v.soda,v.pa);text(b,234,332,20,MUTED);}
+        else text("Not calibrated",234,332,20,ACCENT);
+    };
+    bool on;const char *action=ui_color_action(v,&on);
+    // Upload state of the current group, under the battery.
+    if(v.sync_visible) {
+        const char *label=v.sync_unconfigured?"Dropbox not set up":v.sync==CW_RECORD_SAVING?"Dropbox: saving":v.sync==CW_RECORD_SAVED?"Dropbox: saved":"Dropbox: save failed";
+        text(label,234,66,18,v.sync==CW_RECORD_SAVED?ACCENT:MUTED);
+    }
+    switch(v.page) {
+    case COLOR_WARMUP:
+        text("Warming up",234,124,design::type::body,MUTED);
+        {unsigned seconds=(v.warmup_ms+999)/1000;fmt(234,214,design::type::hero,FG,"%u:%02u",seconds/60,seconds%60);}
+        calibration();break;
+    case COLOR_PLACE:
+        text(v.count?"Place again":"Place on sample",234,124,design::type::body,MUTED);
+        hero(v.count>0,v.count?v.readings[v.count-1]:0,ACCENT);readings();
+        if(v.count) {snprintf(b,sizeof b,"Reading %u of 3",v.count);text(b,234,332,20,MUTED);} else calibration();
+        break;
+    case COLOR_MEASURING:
+        text("Measuring",234,124,design::type::body,MUTED);
+        hero(v.live_valid,v.live,FG);readings();stability_bar(v.progress);break;
+    case COLOR_READING:
+        text("Lift and place again",234,124,design::type::body,MUTED);
+        hero(true,v.readings[v.count-1],ACCENT);readings();
+        snprintf(b,sizeof b,"Reading %u of 3",v.count);text(b,234,332,20,MUTED);break;
+    case COLOR_RESULT:
+        text("Roast color",234,124,design::type::body,MUTED);
+        hero(true,v.mean,ACCENT);readings();
+        snprintf(b,sizeof b,v.retest?"Retest: SD %.1f":"SD %.1f",(double)v.sd);text(b,234,332,20,v.retest?ACCENT:MUTED);break;
+    case COLOR_SATURATED:
+        text("Too bright",234,124,design::type::body,MUTED);hero(false,0,FG);
+        text("Calibrate on baking soda",234,332,20,ACCENT);break;
+    case COLOR_NO_DATA:
+        text("Color sensor",234,124,design::type::body,MUTED);hero(false,0,FG);
+        text("No sensor data",234,332,20,ACCENT);break;
+    case COLOR_CAL_PLACE:
+        text("Calibration",234,124,design::type::body,MUTED);
+        text("Place on baking soda",234,214,design::type::button);
+        text("Reads 230 when done",234,332,20,MUTED);break;
+    case COLOR_CAL_SETTLE:case COLOR_CAL_STEP:
+        text(v.page==COLOR_CAL_STEP?"Calibrating":"Calibration",234,124,design::type::body,MUTED);
+        text("Hold still",234,214,design::type::button);stability_bar(v.progress);break;
+    case COLOR_CAL_DONE:
+        text("Calibrated",234,124,design::type::body,MUTED);hero(true,v.cal_index,ACCENT);
+        snprintf(b,sizeof b,"Baking soda, LED %u",v.pa);text(b,234,332,20,MUTED);break;
+    case COLOR_CAL_FAILED:
+        text("Calibration failed",234,124,design::type::body,MUTED);
+        text(v.failure==COLOR_FAIL_TOO_DARK?"Too dark for 230":"Sensor moved",234,214,design::type::button);
+        snprintf(b,sizeof b,"Kept LED %u",v.pa);text(b,234,332,20,MUTED);break;
+    }
+    bottom(action,on,u.held==1);
 }

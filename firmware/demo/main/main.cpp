@@ -2,6 +2,9 @@
 #include "ui.h"
 #include "design.h"
 #include "probe_trace.h"
+#include "color_mode.h"
+#include "color_sensor.h"
+#include "app_mode.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
@@ -17,6 +20,8 @@
 static QueueHandle_t events,console_commands;
 static cw_flow_t flow;
 static UiState ui;
+// Home picks the product: brew assistant (scale) or roast colorimeter (MAX30101).
+static cw_app_t app;
 static unsigned rs_epoch;
 static cw_record_tracker_t records;
 static bool render_needed=true,rs_requested;
@@ -57,21 +62,34 @@ static void trace_follow(int64_t us) {
     else if(flow.stage!=CW_BREW)probe_trace_stop();
     trace_stage=flow.stage;
 }
+// Home from anywhere: leaves roast color, ends the brew session (a connected scale
+// stays connected and is offered on Home) and keeps Wi-Fi and Dropbox running.
 static void go_home() {
+    if(app.mode==CW_APP_COLOR)color_mode_leave();
+    cw_app_home(&app);
     if(ui.wifi_setup)wifi_setup_close();
     cw_home(&flow);transport_drop_rs();rs_requested=false;rs_epoch=0;
     if(!flow.scale_ready)transport_find_scale();
-    ui={};queue_read=queue_write=0;render_needed=true;
+    int battery=ui.battery_percent;ui={};ui.battery_percent=battery;queue_read=queue_write=0;render_needed=true;
     ESP_LOGI("flow","Home generation=%u",flow.generation);
 }
+static void enter_color(int64_t now) {color_mode_enter(now);render_needed=true;ESP_LOGI("app","roast color");}
+// With the scale connected the brew flow already waits at the brewer carousel.
+static void enter_brew() {render_needed=true;ESP_LOGI("app","brew stage=%u",flow.stage);}
 static void animate(int dir) {
-    if(flow.stage!=CW_BREWER)return;
+    if(app.mode!=CW_APP_BREW||flow.stage!=CW_BREWER)return;
     if(ui.carousel_dir) {if(queue_write-queue_read<16)queued[queue_write++%16]=dir;return;}
     ui.carousel_dir=dir;ui.carousel_from=flow.brewer;ui.carousel_progress=0;animation_start=now_us();render_needed=true;
 }
 static void action(int which) {
     if(!ui_enabled(flow,which,&ui)||ui.carousel_dir)return;
     if(ui.wifi_setup) {wifi_setup_close();ui.wifi_setup=false;ui.held=0;render_needed=true;return;}
+    if(app.mode==CW_APP_HOME) {
+        if(which==UI_HOME_WIFI) {ui.wifi_setup=true;ui.held=0;wifi_setup_open();render_needed=true;}
+        else if(which==UI_HOME_BREW&&cw_app_choose(&app,CW_APP_BREW))enter_brew();
+        else if(which==UI_HOME_COLOR&&cw_app_choose(&app,CW_APP_COLOR))enter_color(now_us());
+        return;
+    }
     if(which==1&&(flow.stage==CW_HOME||(!flow.scale_ready&&flow.stage==CW_BREWER))) {ui.wifi_setup=true;ui.held=0;wifi_setup_open();render_needed=true;return;}
     if(which==1&&flow.stage==CW_BREW&&flow.result_valid) {cw_revisit_stopped(&flow);return;}
     if(which==1&&flow.stage==CW_BREWER) {cw_choose(&flow,flow.brewer);if(flow.stage==CW_EMPTY)save_brewer(flow.brewer);return;}
@@ -83,6 +101,9 @@ static void action(int which) {
 }
 static void back() {
     if(ui.wifi_setup) {wifi_setup_close();ui.wifi_setup=false;ui.held=0;render_needed=true;return;}
+    if(app.mode==CW_APP_HOME)return;
+    // Back from the brewer carousel is Home.
+    if(flow.stage==CW_BREWER||flow.stage==CW_HOME) {go_home();return;}
     cw_back(&flow);
     transport_drop_rs();rs_requested=false;rs_epoch=0;if(!flow.scale_ready)transport_find_scale();
     ui={};queue_read=queue_write=0;render_needed=true;
@@ -114,7 +135,7 @@ static void input_tick(BoardInput raw,int64_t now) {
     } else {
         if(in.next&&!in.next_consumed&&now-in.next_start>=650000) {in.next_consumed=true;in.select_consumed=true;back();}
         if(!in.next&&prev_next&&!in.next_consumed&&in.next_gen==flow.generation) {
-            if(!ui.wifi_setup&&flow.stage==CW_BREWER)animate(1);
+            if(!ui.wifi_setup&&app.mode==CW_APP_BREW&&flow.stage==CW_BREWER)animate(1);
             else turn_page(1,now);
         }
         if(!in.select&&prev_select&&!in.select_consumed&&in.select_gen==flow.generation)action(1);
@@ -133,7 +154,7 @@ static void input_tick(BoardInput raw,int64_t now) {
         else if(!in.touch_cancel) {
             int dx=in.last_x-in.start_x,dy=in.last_y-in.start_y;
             if(!ui.wifi_setup&&std::abs(dx)>50&&std::abs(dx)>std::abs(dy)) {
-                if(flow.stage==CW_BREWER)animate(dx<0?1:-1);
+                if(app.mode==CW_APP_BREW&&flow.stage==CW_BREWER)animate(dx<0?1:-1);
                 else turn_page(dx<0?1:-1,now);
             }
         }
@@ -149,8 +170,20 @@ static void input_tick(BoardInput raw,int64_t now) {
 static void receive(const demo_event_t &e) {
     cw_stage_t before=flow.stage;
     switch(e.kind) {
-    case DE_SCALE_UP:cw_scale_link(&flow,true,e.epoch);break;
-    case DE_SCALE_DOWN:cw_scale_link(&flow,false,e.epoch);probe_trace_weight(false,0);break;
+    case DE_SCALE_UP: {
+        cw_scale_link(&flow,true,e.epoch);
+        cw_app_mode_t was=app.mode;cw_app_scale(&app,true,ui.wifi_setup,true);
+        if(was==CW_APP_HOME&&app.mode==CW_APP_BREW)enter_brew();
+        break;
+    }
+    case DE_SCALE_DOWN: {
+        cw_scale_link(&flow,false,e.epoch);probe_trace_weight(false,0);
+        // Without a brew in progress, losing the scale returns Home; mid-brew it interrupts.
+        bool idle=!flow.interrupted&&(flow.stage==CW_HOME||flow.stage==CW_BREWER);
+        cw_app_mode_t was=app.mode;cw_app_scale(&app,false,ui.wifi_setup,idle);
+        if(was==CW_APP_BREW&&app.mode==CW_APP_HOME)go_home();
+        break;
+    }
     case DE_RS_UP:rs_epoch=e.epoch;cw_rs_link(&flow,true);break;
     case DE_RS_DOWN:cw_rs_link(&flow,false);if(flow.stage==CW_TDS)transport_find_rs();break;
     case DE_SCALE:
@@ -161,6 +194,7 @@ static void receive(const demo_event_t &e) {
     case DE_WRITE:if(e.generation==flow.generation)cw_write_done(&flow,e.success);break;
     case DE_WIFI:ui.network=e.data.network;network_activity_us=e.us;ESP_LOGI("network","state=%u setup=%u paired=%u saved=%u reason=%d",ui.network.state,ui.network.setup_active,ui.network.paired,ui.network.saved,ui.network.reason);break;
     case DE_RECORD:
+        color_mode_record(e.data.record);
         if(!strcmp(e.data.record.id,records.record.id)&&(!ui.record_visible||e.data.record.revision>=ui.record.revision)) {ui.record=e.data.record;ui.record_visible=true;network_activity_us=e.us;}
         break;
     case DE_ERROR:snprintf(flow.error,sizeof flow.error,"%s",e.data.error);ESP_LOGE("flow","%s",flow.error);break;
@@ -194,9 +228,10 @@ static void console_task(void *arg) {
 extern "C" void app_main() {
     setvbuf(stdin,nullptr,_IONBF,0);ESP_ERROR_CHECK(nvs_flash_init());
     events=xQueueCreate(128,sizeof(demo_event_t));console_commands=xQueueCreate(4,sizeof(ConsoleCommand));configASSERT(events&&console_commands);
-    cw_init(&flow);flow.brewer=saved_brewer();board_init();probe_trace_init();ui.battery_percent=board_battery_percent();ui_tick(flow,ui,now_us());ui_draw(flow,ui);board_present();
+    cw_init(&flow);flow.brewer=saved_brewer();board_init();color_sensor_init();cw_app_init(&app);
+    probe_trace_init();ui.home=true;ui.battery_percent=board_battery_percent();ui_tick(flow,ui,now_us());ui_draw(flow,ui);board_present();
     uint8_t mac[6];esp_read_mac(mac,ESP_MAC_WIFI_STA);char session[40];
-    snprintf(session,sizeof session,"%02x%02x%02x%02x%02x%02x-%08lx%08lx",mac[0],mac[1],mac[2],mac[3],mac[4],mac[5],(unsigned long)esp_random(),(unsigned long)esp_random());cw_record_init(&records,session);
+    snprintf(session,sizeof session,"%02x%02x%02x%02x%02x%02x-%08lx%08lx",mac[0],mac[1],mac[2],mac[3],mac[4],mac[5],(unsigned long)esp_random(),(unsigned long)esp_random());cw_record_init(&records,session);color_mode_init(session);
     wifi_setup_init();transport_init();xTaskCreate(console_task,"console",4096,nullptr,2,nullptr);
     ESP_LOGI("demo","coffee-watch-demo-v3; UI=%dx%d",(int)board_canvas().width(),(int)board_canvas().height());
     int64_t last_draw=0,last_activity=now_us(),last_battery=last_activity;
@@ -206,6 +241,7 @@ extern "C" void app_main() {
     auto last_phase=flow.scale.phase;
     bool last_scale=flow.scale_ready,last_rs=flow.rs_ready,last_interrupted=flow.interrupted;
     unsigned probe_seq=0;
+    int64_t last_sensor_poll=-1000000;cw_app_mode_t last_mode=app.mode;
     for(;;) {
         demo_event_t e;unsigned n=0;while(n++<32&&xQueueReceive(events,&e,0)==pdTRUE)receive(e);
         // Each new 10 Hz bed-probe reading feeds pour detection once.
@@ -224,7 +260,26 @@ extern "C" void app_main() {
         int64_t now=now_us();
         BoardInput raw=board_input();
         if(raw.next||raw.select||(raw.touch_valid&&raw.touch))last_activity=now;
-        input_tick(raw,now);
+        // Home polls G5/G6 twice a second; a newly attached color sensor picks roast color.
+        if(app.mode==CW_APP_HOME&&now-last_sensor_poll>=500000) {
+            last_sensor_poll=now;bool present=app.sensor_present;
+            cw_app_sensor(&app,color_sensor_probe(),ui.wifi_setup);
+            if(app.sensor_present!=present)render_needed=true;
+            if(app.mode==CW_APP_COLOR)enter_color(now);
+        }
+        ui.home=app.mode==CW_APP_HOME;ui.home_scale=flow.scale_ready;ui.home_color=app.sensor_present;
+        if(app.mode==CW_APP_COLOR) {
+            if(color_mode_tick(now))last_activity=now;
+            if(color_mode_input(raw,now,ui))go_home();
+            else if(color_mode_sensor_lost(now)) {
+                ESP_LOGW("app","color sensor stopped answering; Home");
+                color_mode_leave();cw_app_sensor_lost(&app);go_home();
+            }
+        } else input_tick(raw,now);
+        // A brew session that ends without a scale (Back from Waiting TDS with the scale off) is Home.
+        if(app.mode==CW_APP_BREW&&flow.stage==CW_HOME&&!flow.interrupted)go_home();
+        if(app.mode!=last_mode) {last_mode=app.mode;last_activity=now;render_needed=true;}
+        ui.home=app.mode==CW_APP_HOME;ui.home_scale=flow.scale_ready;ui.home_color=app.sensor_present;
         trace_follow(now);
         if(now-last_battery>=1000000) {
             last_battery=now;battery_percent=board_battery_percent();
@@ -240,7 +295,9 @@ extern "C" void app_main() {
         }
         ConsoleCommand cmd;
         if(xQueueReceive(console_commands,&cmd,0)==pdTRUE) {
-            if(!strcmp(cmd.line,"screen"))board_dump();
+            if(app.mode==CW_APP_COLOR&&color_mode_console(cmd.line,now))last_activity=now;
+            else if(!strcmp(cmd.line,"screen"))board_dump();
+            else if(!strcmp(cmd.line,"mode"))printf("MODE %s sensor=%u scale=%u\n",app.mode==CW_APP_HOME?"home":app.mode==CW_APP_BREW?"brew":"color",app.sensor_present,flow.scale_ready);
             else if(!strcmp(cmd.line,"netstatus"))printf("NETWORK state=%u setup=%u paired=%u saved=%u reason=%d setup_error=%d\n",ui.network.state,ui.network.setup_active,ui.network.paired,ui.network.saved,ui.network.reason,ui.network.setup_error);
             else if(!strcmp(cmd.line,"status"))printf("STATUS stage=%u generation=%u scale=%u rs=%u phase=%u dose_valid=%u dose_cg=%ld weight_cg=%ld empty_cg=%ld beverage_cg=%ld\n",flow.stage,flow.generation,flow.scale_ready,flow.rs_ready,flow.scale.phase,flow.scale.dose_valid,(long)flow.scale.dose_cg,(long)flow.live_cg,(long)flow.empty_cg,(long)flow.beverage_cg);
             else if(!strcmp(cmd.line,"probe")) {
@@ -248,6 +305,8 @@ extern "C" void app_main() {
                 printf("PROBE valid=%u celsius=%.2f ratio=%.4f ntc_mv=%d ref_mv=%d trace_active=%u brew_started=%u samples=%u truncated=%u\n",p.valid,(double)p.celsius,(double)p.ratio,p.ntc_mv,p.ref_mv,p.active,p.brew_started,p.count,p.truncated);
             }
             else if(!strcmp(cmd.line,"home")) {last_activity=now;go_home();}
+            // The Home tiles from the console; only a connected device can be opened.
+            else if(!strcmp(cmd.line,"open brew")||!strcmp(cmd.line,"open color")) {last_activity=now;if(app.mode==CW_APP_HOME&&!ui.wifi_setup)action(cmd.line[5]=='b'?UI_HOME_BREW:UI_HOME_COLOR);}
             else if(!strcmp(cmd.line,"next")) {last_activity=now;animate(1);}
             else if(!strcmp(cmd.line,"select")) {last_activity=now;action(1);}
             else if(!strcmp(cmd.line,"back")) {last_activity=now;back();}
@@ -268,9 +327,15 @@ extern "C" void app_main() {
             board_shutdown();
             vTaskSuspend(nullptr);
         }
-        if(ui_result_pages(flow)>1&&!ui.wifi_setup&&now-ui.page_us>=result_page_us)turn_page(1,now);
-        if(ui_tick(flow,ui,now))render_needed=true;
-        if(render_needed&&now-last_draw>=design::motion::frame_us) {ui_draw(flow,ui);board_present();last_draw=now;render_needed=false;}
+        if(app.mode==CW_APP_COLOR) {
+            // The meter redraws at 10 Hz (live index, warm-up clock), faster while animating.
+            if(color_mode_animating(now)||now-last_draw>=100000)render_needed=true;
+            if(render_needed&&now-last_draw>=design::motion::frame_us) {color_mode_draw(ui);board_present();last_draw=now;render_needed=false;}
+        } else {
+            if(app.mode==CW_APP_BREW&&ui_result_pages(flow)>1&&!ui.wifi_setup&&now-ui.page_us>=result_page_us)turn_page(1,now);
+            if(ui_tick(flow,ui,now))render_needed=true;
+            if(render_needed&&now-last_draw>=design::motion::frame_us) {ui_draw(flow,ui);board_present();last_draw=now;render_needed=false;}
+        }
         vTaskDelay(pdMS_TO_TICKS(5));
     }
 }

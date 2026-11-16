@@ -28,6 +28,11 @@ The bed probe uses the back header: G8 is the NTC node (3V3 → 10 kΩ → G8 �
 100 kΩ B3950 NTC → GND) and G9 is a 3V3/2 reference. Serial command `probe`
 prints the current temperature, the G8/G9 voltages and the trace state.
 
+Home (`app_mode` component) picks the product: a scale link opens the brew
+assistant, a MAX30101 roast-color sensor on G5 (SDA) / G6 (SCL) opens roast color
+mode (`main/color_mode.cpp`, `main/color_sensor.c`); see
+[Roast color mode](../../spec/colorimeter.md) for its rules and serial commands.
+
 The demo is paired to the two physical BLE addresses already verified in transport.c. It is not a general device-picker or configuration product.
 Start serial capture before connecting BLE; closing USB can reset StopWatch.
 
@@ -85,7 +90,8 @@ These primary product rules are evaluated only when weight notifications arrive;
   event before returning to preparation with the scale-stored dose. Revisiting
   a stopped brewing page shows its frozen evidence; Stop returns to final weighing
   without sending a duplicate stop or fabricating another completion.
-- Hold both keys 900ms: new Home/session. Chord consumes short actions.
+- Hold both keys 900ms on any page: Home (ends the brew session or leaves roast
+  color). Chord consumes short actions. Next held on the brewer carousel is Home too.
 - Reports ignore short physical presses; swipe or long Home/Back only.
 - Scale loss interrupts the current brew and clears the stability window. Long
   Home begins a new session; reconnect never automatically resumes old brewing.
@@ -96,7 +102,8 @@ RS source. Missing events remain pending until explicit cancellation/Home.
 
 ## Development console
 
-`status`, `screen`, `home`, `next`, `select`, `back` are diagnostic commands.
+`status`, `screen`, `home`, `next`, `select`, `back`, `mode`, `open brew` and
+`open color` are diagnostic commands.
 They invoke the same UI actions; there is no command to inject a measurement.
 `screen` emits SCREEN565/PX rows for inspecting the real framebuffer. Capture
 with `tools/ble_capture.py --quiet-rx --quiet-pixels` to suppress raw screen rows

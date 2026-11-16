@@ -30,6 +30,19 @@
       G8 voltage with rising probe temperature; 90 °C water reads 88–92 °C.
 - [ ] Start → pour → Stop produces `brew-<id>-trace.csv` at 10 Hz, `t_ms` 0 at
       the pour, and the record's `probe_trace` points to it.
+- [ ] Boot shows Home; the scale connecting opens the brewer carousel, attaching
+      the RoastWatch color sensor opens roast color, whichever is first.
+- [ ] Holding both keys 900 ms on any brew or color page returns Home; a still
+      connected device is a lit tile and a tap opens it; Wi-Fi setup works from Home.
+- [ ] Color mode warms up for 60 s; lifted (glass installed) reads below 28000 and
+      the darkest sample above 30000 in `stream`.
+- [ ] Each placement records one reading after 2 stable seconds; staying on the
+      sample adds none; three placements show the mean, readings and SD.
+- [ ] With Wi-Fi and Dropbox set up in the brew assistant, every color reading
+      updates `/roast-color-<id>.json` (status `complete` after the third) and the
+      watch shows `Dropbox: saved`.
+- [ ] Baking-soda calibration ends near 230 (within one LED step), survives a reboot, and Cancel or a
+      failure keeps the previous LED level.
 
 Automated checks run with `python3 -m unittest discover -s tools -v`.
 Physical checks are a checklist, not an assertion that every release passed them.

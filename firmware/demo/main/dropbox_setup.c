@@ -30,7 +30,7 @@
 // Private state belongs to one task. Public snapshots contain no credentials.
 typedef struct {char key[CW_DROPBOX_KEY_MAX+1],secret[CW_DROPBOX_SECRET_MAX+1],refresh[512];} account_t;
 typedef struct {char state[24],error[40];bool saved;uint32_t request;} public_t;
-typedef struct {cw_dropbox_command_t command;unsigned revision;bool brew;cw_brew_record_t record;cw_trace_snapshot_t *trace;} queued_command_t;
+typedef struct {cw_dropbox_command_t command;unsigned revision;bool brew,color;cw_brew_record_t record;rc_record_t color_record;cw_trace_snapshot_t *trace;} queued_command_t;
 typedef enum {UPLOAD_OK,UPLOAD_FAILED,UPLOAD_CONFLICT,UPLOAD_RESPONSE_INVALID,UPLOAD_HASH_MISMATCH} upload_result_t;
 static account_t account;
 // The record being written: its path, the rev Dropbox returned for our last upload and its trace.
@@ -243,6 +243,37 @@ static void upload_record(const cw_brew_record_t *input,const cw_trace_snapshot_
 finished:
     record_status(r,error?CW_RECORD_FAILED:CW_RECORD_SAVED,path,error);
 }
+static void color_status(const rc_record_t *r,cw_record_sync_t state,const char *path,const char *error) {
+    cw_record_status_t status={.state=state,.revision=r->revision};
+    snprintf(status.id,sizeof status.id,"%.63s",r->id);snprintf(status.path,sizeof status.path,"%s",path?path:"");snprintf(status.error,sizeof status.error,"%s",error?error:"");
+    ESP_LOGI("record","color id=%s revision=%u state=%u path=%s error=%s",status.id,status.revision,state,status.path,status.error);demo_record_status(&status);
+}
+// A roast-color group is one document per group, replaced whole after each reading.
+// After this watch has written it, updates name that exact revision; before that
+// (or after a failed first upload) the path, unique to this boot, is overwritten.
+static void upload_color(const rc_record_t *r) {
+    char path[96]="",json[1536],rev[64]="",mode[96];const char *error=NULL;
+    color_status(r,CW_RECORD_SAVING,NULL,NULL);
+    if(!load()) {error="authorize_first";goto finished;}
+    if(!clock_ready()) {error="clock_sync_failed";goto finished;}
+    if(!current()) {error="authorization_changed";goto finished;}
+    if(!refresh()) {error="refresh_failed";goto finished;}
+    bool exists=record_file.path[0]&&record_file.rev[0]&&!strcmp(record_file.id,r->id)&&record_file.authorization_revision==active_revision;
+    if(exists) {
+        snprintf(path,sizeof path,"%s",record_file.path);
+        snprintf(mode,sizeof mode,"{\".tag\":\"update\",\"update\":\"%s\"}",record_file.rev);
+    } else {
+        memset(&record_file,0,sizeof record_file);snprintf(record_file.id,sizeof record_file.id,"%.63s",r->id);record_file.authorization_revision=active_revision;
+        snprintf(path,sizeof path,"/roast-color-%.63s.json",r->id);snprintf(mode,sizeof mode,"\"overwrite\"");
+    }
+    struct timeval wall;gettimeofday(&wall,NULL);
+    int64_t offset=(int64_t)wall.tv_sec*1000000+wall.tv_usec-esp_timer_get_time();
+    if(rc_record_json(r,offset,json,sizeof json)<0) {error="record_invalid";goto finished;}
+    error=upload_error(upload(path,mode,json,strlen(json),rev,sizeof rev),"record_upload_failed","record_changed_elsewhere","record_response_invalid","record_readback_failed");
+    if(!error) {snprintf(record_file.path,sizeof record_file.path,"%s",path);snprintf(record_file.rev,sizeof record_file.rev,"%s",rev);}
+finished:
+    color_status(r,error?CW_RECORD_FAILED:CW_RECORD_SAVED,path,error);
+}
 static void finish_auth(void) {
     if(!store(false)) {set_state("failed","storage_error");return;}
     set_state("verifying",NULL);
@@ -272,7 +303,10 @@ static void dropbox_task(void *arg) {
     queued_command_t item;
     for(;;) {
         if(xQueueReceive(commands,&item,portMAX_DELAY)!=pdTRUE)continue;
-        if(item.brew) {
+        if(item.color) {
+            if(item.revision!=atomic_load(&revision))color_status(&item.color_record,CW_RECORD_FAILED,NULL,"authorization_changed");
+            else {active_revision=item.revision;wipe_session();upload_color(&item.color_record);}
+        } else if(item.brew) {
             if(item.revision!=atomic_load(&revision))record_status(&item.record,CW_RECORD_FAILED,NULL,"authorization_changed");
             else {active_revision=item.revision;wipe_session();upload_record(&item.record,item.trace);}
             free(item.trace);item.trace=NULL;
@@ -311,6 +345,13 @@ bool dropbox_setup_record(const cw_brew_record_t *record,cw_trace_snapshot_t *tr
     queued_command_t item={.revision=atomic_load(&revision),.brew=true,.record=*record,.trace=trace};
     bool ok=xQueueSend(commands,&item,0)==pdTRUE;mbedtls_platform_zeroize(&item,sizeof item);
     if(!ok) {free(trace);record_status(record,CW_RECORD_FAILED,NULL,"record_queue_full");}
+    return ok;
+}
+bool dropbox_setup_color(const rc_record_t *record) {
+    if(!atomic_load(&have_credentials)) {color_status(record,CW_RECORD_FAILED,NULL,"authorize_first");return false;}
+    queued_command_t item={.revision=atomic_load(&revision),.color=true,.color_record=*record};
+    bool ok=xQueueSend(commands,&item,0)==pdTRUE;mbedtls_platform_zeroize(&item,sizeof item);
+    if(!ok)color_status(record,CW_RECORD_FAILED,NULL,"record_queue_full");
     return ok;
 }
 int dropbox_setup_status(char *out,int capacity) {

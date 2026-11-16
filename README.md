@@ -6,6 +6,15 @@ Coffee Watch connects an M5Stack StopWatch, a Bluetooth coffee scale, and a
 refractometer. A defined brewing workflow brings measurements from these devices
 together to calculate and present your brew data with minimal manual recording.
 
+## Home
+
+The watch starts on Home: **Connect scale or color sensor**, a Brew and a Roast
+color tile, and Wi-Fi setup. Whichever connects first picks the product: the scale
+opens the brew assistant, the RoastWatch color sensor opens roast color mode. Hold
+both keys for 0.9 s on any page to return Home; a device that is still connected is
+then offered as a lit tile instead of reopening by itself. Wi-Fi and Dropbox are
+shared by both.
+
 ## From brewing to a report
 
 1. **Choose a brewer.** Select V60, Hario Switch, AeroPress, or Ceado Hoop.
@@ -59,15 +68,27 @@ this interval.
 | BOOKOO Themis Ultra | Coffee dose and weight | Firmware 4.0.1, Ratio mode (Auto not used) |
 | DiFluid RS | TDS measurement | Firmware v002-005 |
 | Bed probe | Brew start and temperature trace | 100 kΩ B3950 NTC on G8, G9 = 3V3/2 reference |
+| SparkFun SEN-16474 (MAX30101) | Roast color mode, on the RoastWatch adapter | G5 = SDA, G6 = SCL; not yet validated on hardware |
 
 This is a prototype with real brewing walkthroughs completed. The firmware
 connects to the two peers configured in its transport; a general device picker
 is not yet available. The workflow depends on the events provided by these
 devices and firmware versions. Other models and versions have not been validated.
 
+## Roast color mode
+
+Attach the RoastWatch adapter with its MAX30101 sensor and Home opens roast color
+mode. Place it on a
+scraped-flat sample cup: each placement records one reading after 2 stable
+seconds, and three placements give the mean and its spread. Calibrate once on
+fresh baking soda, which sets the IR LED so it reads 230. Every reading is
+uploaded to Dropbox over the saved Wi-Fi as that group's JSON record. The index uses the
+open-source Roast Meter's sensor settings and formula; it ranks your own roasts
+and is not an Agtron value. See [Roast color mode](spec/colorimeter.md).
+
 ## Wi-Fi setup
 
-On the idle screen, tap **Wi-Fi setup**, then open the
+On Home, tap **Wi-Fi setup**, then open the
 [Chrome setup page](https://e7h4n.github.io/coffee-watch/). Connect over Web
 Bluetooth, enter the pairing code shown on the watch if requested, and submit
 your 2.4 GHz network details. Credentials go directly to the watch; the static
@@ -91,6 +112,7 @@ building, and flashing.
 
 - [Visual system and shared components](spec/design.md)
 - [Product behavior and interactions](spec/product.md)
+- [Roast color mode](spec/colorimeter.md)
 - [Wi-Fi setup and provisioning](spec/wifi.md)
 - [Bluetooth interfaces](spec/bluetooth.md)
 - [Acceptance checklist](spec/acceptance.md)
