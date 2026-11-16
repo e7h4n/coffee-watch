@@ -88,9 +88,12 @@ static void enter_color(int64_t now) {color_mode_enter(now);render_needed=true;E
 static void enter_brew() {render_needed=true;ESP_LOGI("app","brew stage=%u",flow.stage);}
 // Either scale counts for Home: a new connection opens brewing, losing the last
 // one outside a brew returns Home.
-static void app_link() {
+// A link with a new epoch is a scale's new connection; Home re-announces links that
+// were already up, and those must not reopen brewing.
+static unsigned scale_epoch_seen,aux_epoch_seen;
+static void app_link(bool fresh=false) {
     bool idle=!flow.interrupted&&(flow.stage==CW_HOME||flow.stage==CW_BREWER);
-    cw_app_mode_t was=app.mode;cw_app_scale(&app,flow.scale_ready||flow.aux_ready,ui.wifi_setup,idle);
+    cw_app_mode_t was=app.mode;cw_app_scale(&app,flow.scale_ready||flow.aux_ready,fresh,ui.wifi_setup,idle);
     if(was==CW_APP_HOME&&app.mode==CW_APP_BREW)enter_brew();
     else if(was==CW_APP_BREW&&app.mode==CW_APP_HOME)go_home();
 }
@@ -195,16 +198,24 @@ static void input_tick(BoardInput raw,int64_t now) {
     }
     if(old!=ui.held||prev_next!=in.next||prev_select!=in.select||raw.touch!=old_touch||old_gen!=flow.generation)render_needed=true;
 }
+// Second-scale notification statistics for the serial `scales` command.
+static unsigned aux_count;static int64_t aux_first_us,aux_last_us,aux_max_gap_us;
 static void receive(const demo_event_t &e) {
     cw_stage_t before=flow.stage;
     switch(e.kind) {
     // Losing a scale before the pour restarts at the carousel (the flow does that);
     // mid-brew it interrupts.
-    case DE_SCALE_UP:cw_scale_link(&flow,true,e.epoch);app_link();break;
+    case DE_SCALE_UP: {bool fresh=e.epoch!=scale_epoch_seen;scale_epoch_seen=e.epoch;cw_scale_link(&flow,true,e.epoch);app_link(fresh);break;}
     case DE_SCALE_DOWN:cw_scale_link(&flow,false,e.epoch);probe_trace_weight(false,0);app_link();break;
-    case DE_AUX_UP:cw_aux_link(&flow,true,e.epoch);app_link();ESP_LOGI("flow","second scale up dual=%u stage=%u",flow.dual,flow.stage);break;
+    case DE_AUX_UP: {
+        bool fresh=e.epoch!=aux_epoch_seen;aux_epoch_seen=e.epoch;cw_aux_link(&flow,true,e.epoch);app_link(fresh);
+        ESP_LOGI("flow","second scale up fresh=%u dual=%u stage=%u",fresh,flow.dual,flow.stage);break;
+    }
     case DE_AUX_DOWN:cw_aux_link(&flow,false,e.epoch);probe_trace_aux(false,0);app_link();break;
     case DE_AUX:
+        if(aux_count&&e.us>aux_last_us) {int64_t gap=e.us-aux_last_us;if(gap>aux_max_gap_us)aux_max_gap_us=gap;}
+        if(!aux_count)aux_first_us=e.us;
+        aux_count++;aux_last_us=e.us;
         cw_aux_weight(&flow,e.epoch,e.data.aux_cg,e.us);
         if(flow.aux_ready&&e.epoch==flow.aux_epoch)probe_trace_aux(true,flow.aux_cg);
         break;
@@ -300,8 +311,9 @@ extern "C" void app_main() {
                 color_mode_leave();cw_app_sensor_lost(&app);go_home();
             }
         } else input_tick(raw,now);
-        // A brew session that ends without a scale (Back from Waiting TDS with the scale off) is Home.
-        if(app.mode==CW_APP_BREW&&flow.stage==CW_HOME&&!flow.interrupted)go_home();
+        // A brew session that ends with no scale at all (Back from Waiting TDS with the
+        // scale off) is Home; with the second scale alone the brew waits for BOOKOO.
+        if(app.mode==CW_APP_BREW&&flow.stage==CW_HOME&&!flow.interrupted&&!flow.aux_ready)go_home();
         if(app.mode!=last_mode) {last_mode=app.mode;last_activity=now;render_needed=true;}
         ui.home=app.mode==CW_APP_HOME;ui.home_scale=flow.scale_ready||flow.aux_ready;ui.home_color=app.sensor_present;dual_view();
         trace_follow(now);
@@ -321,6 +333,11 @@ extern "C" void app_main() {
         if(xQueueReceive(console_commands,&cmd,0)==pdTRUE) {
             if(app.mode==CW_APP_COLOR&&color_mode_console(cmd.line,now))last_activity=now;
             else if(!strcmp(cmd.line,"screen"))board_dump();
+            else if(!strcmp(cmd.line,"scales")) {
+                double span=(aux_last_us-aux_first_us)/1e6;
+                printf("SCALES bookoo=%u aux=%u aux_cg=%ld aux_count=%u aux_hz=%.2f aux_max_gap_ms=%lld aux_last_ms_ago=%lld\n",flow.scale_ready,flow.aux_ready,(long)flow.aux_cg,aux_count,
+                    aux_count>1&&span>0?(aux_count-1)/span:0.0,(long long)(aux_max_gap_us/1000),(long long)(aux_count?(now-aux_last_us)/1000:-1));
+            }
             else if(!strcmp(cmd.line,"mode"))printf("MODE %s sensor=%u scale=%u\n",app.mode==CW_APP_HOME?"home":app.mode==CW_APP_BREW?"brew":"color",app.sensor_present,flow.scale_ready);
             else if(!strcmp(cmd.line,"netstatus"))printf("NETWORK state=%u setup=%u paired=%u saved=%u reason=%d setup_error=%d\n",ui.network.state,ui.network.setup_active,ui.network.paired,ui.network.saved,ui.network.reason,ui.network.setup_error);
             else if(!strcmp(cmd.line,"status")) {
