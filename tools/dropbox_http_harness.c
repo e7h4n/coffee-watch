@@ -34,7 +34,7 @@ static size_t heap_caps_get_largest_free_block(int caps) {(void)caps;return 5000
 static int64_t esp_timer_get_time(void) {return 1000;}
 static esp_http_client_handle_t esp_http_client_init(const esp_http_client_config_t *c) {
     assert(c->disable_auto_redirect);
-    assert(c->timeout_ms==(!strcmp(c->url,"https://api.dropboxapi.com/2/files/get_metadata")?45000:15000));
+    assert(c->timeout_ms==15000);
     return init_fail?NULL:(void*)1;
 }
 static int esp_http_client_set_method(void *h,int method) {assert(h&&method==HTTP_METHOD_POST);return ++setup_calls==fail_at?ESP_ERR_NO_MEM:ESP_OK;}
@@ -69,10 +69,11 @@ int main(void) {
     puts("PASS production method/header/init/allocation failures stop before open/send, no credential logging");
     reset();partial=true;assert(upload_test()==-1&&opens==1&&writes==2&&cleanups==1&&closes==1);assert(strstr(last_log,"request_bytes=6 sent_bytes=3"));
     reset();open_fail=true;assert(upload_test()==-1&&opens==1&&!writes);assert(strstr(last_log,"sent_bytes=0"));
-    reset();incomplete=true;assert(upload_test()==-1&&writes==1);assert(strstr(last_log,"request_bytes=6 sent_bytes=6"));
+    reset();incomplete=true;assert(upload_test()==-1&&writes==1);assert(strstr(last_log,"request_bytes=6 sent_bytes=6")&&strstr(last_log,"wire_status=200")&&strstr(last_log,"complete=0"));
     puts("PASS partial write/open failure/incomplete response keep failure and explicit intended/accepted byte counts");
     reset();assert(upload_test()==200);assert(strstr(last_log,"op=upload")&&strstr(last_log,"sent_bytes=6"));
-    reset();assert(http("https://api.dropboxapi.com/2/files/get_metadata","abcdef",6,"application/json",true,NULL)==200);assert(strstr(last_log,"op=metadata"));
+    reset();fail_at=4;assert(http("https://api.dropboxapi.com/2/files/get_metadata","abcdef",6,"application/json",true,NULL)==-1);assert(!opens&&strstr(last_log,"setup=connection"));
+    reset();assert(http("https://api.dropboxapi.com/2/files/get_metadata","abcdef",6,"application/json",true,NULL)==200);assert(strstr(last_log,"op=metadata")&&strstr(last_log,"wire_status=200")&&strstr(last_log,"complete=1"));
     reset();assert(http(TOKEN_URL,"abcdef",6,"application/x-www-form-urlencoded",false,NULL)==200);assert(strstr(last_log,"op=token")&&!strstr(last_log,"secret-value"));
     puts("PASS production HTTP success distinguishes token/upload/metadata operations");
     reset();char large[46797];memset(large,'x',sizeof large);

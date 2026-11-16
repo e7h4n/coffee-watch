@@ -85,10 +85,7 @@ static bool clock_ready(void) {
 }
 static int http(const char *url,const char *body,size_t length,const char *type,bool authorized,const char *api_arg) {
     mbedtls_platform_zeroize(response,sizeof response);
-    // Allow slow read-only metadata responses more time, without
-    // replaying any write on a timeout.
-    int timeout=!strcmp(url,"https://api.dropboxapi.com/2/files/get_metadata")?45000:15000;
-    esp_http_client_config_t cfg={.url=url,.timeout_ms=timeout,.crt_bundle_attach=esp_crt_bundle_attach,.disable_auto_redirect=true,.buffer_size=2048,.buffer_size_tx=4096};
+    esp_http_client_config_t cfg={.url=url,.timeout_ms=15000,.crt_bundle_attach=esp_crt_bundle_attach,.disable_auto_redirect=true,.buffer_size=2048,.buffer_size_tx=4096};
     const char *op=!strcmp(url,TOKEN_URL)?"token":!strcmp(url,UPLOAD_URL)?"upload":"metadata";
     esp_http_client_handle_t h=esp_http_client_init(&cfg);
     if(!h) {ESP_LOGW("dropbox","http op=%s setup=init failed request_bytes=%u sent_bytes=0",op,(unsigned)length);return -1;}
@@ -102,8 +99,10 @@ static int http(const char *url,const char *body,size_t length,const char *type,
         sprintf(auth,"Bearer %s",access_token);setup=esp_http_client_set_header(h,"Authorization",auth);mbedtls_platform_zeroize(auth,strlen(auth));free(auth);
         if(setup!=ESP_OK)goto setup_failed;
     }
+    if(!strcmp(op,"metadata")) {stage="connection";setup=esp_http_client_set_header(h,"Connection","close");if(setup!=ESP_OK)goto setup_failed;}
     ESP_LOGI("dropbox","TLS heap internal_free=%u internal_largest=%u psram_free=%u",(unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),(unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),(unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));
-    int status=-1;size_t sent_bytes=0;int64_t started=esp_timer_get_time();
+    int status=-1,wire_status=0,read=-1;bool complete=false;
+    int64_t fetched=-1;size_t sent_bytes=0;int64_t started=esp_timer_get_time();
     esp_err_t opened=esp_http_client_open(h,(int)length);
     if(opened==ESP_OK) {
         bool sent=true;
@@ -115,15 +114,18 @@ static int http(const char *url,const char *body,size_t length,const char *type,
             if(written<=0||written>(int)chunk) {sent=false;break;}
             sent_bytes+=(size_t)written;
         }
-        if(sent&&esp_http_client_fetch_headers(h)>=0) {
-            int used=0,read=0;
-            while(used<RESPONSE_MAX-1&&(read=esp_http_client_read(h,response+used,RESPONSE_MAX-1-used))>0)used+=read;
-            response[used]=0;
-            if(read>=0&&esp_http_client_is_complete_data_received(h))status=esp_http_client_get_status_code(h);
+        if(sent) {
+            fetched=esp_http_client_fetch_headers(h);wire_status=esp_http_client_get_status_code(h);
+            if(fetched>=0) {
+                int used=0;read=0;
+                while(used<RESPONSE_MAX-1&&(read=esp_http_client_read(h,response+used,RESPONSE_MAX-1-used))>0)used+=read;
+                response[used]=0;complete=esp_http_client_is_complete_data_received(h);
+                if(read>=0&&complete)status=wire_status;
+            }
         }
     }
     // Log only operation/status/transport metadata, never token bodies or headers.
-    ESP_LOGI("dropbox","http op=%s status=%d open=%s request_bytes=%u sent_bytes=%u response_bytes=%u elapsed_ms=%lld",op,status,esp_err_to_name(opened),(unsigned)length,(unsigned)sent_bytes,(unsigned)strlen(response),(long long)((esp_timer_get_time()-started)/1000));
+    ESP_LOGI("dropbox","http op=%s status=%d open=%s request_bytes=%u sent_bytes=%u response_bytes=%u elapsed_ms=%lld wire_status=%d fetched_bytes=%lld read=%d complete=%u",op,status,esp_err_to_name(opened),(unsigned)length,(unsigned)sent_bytes,(unsigned)strlen(response),(long long)((esp_timer_get_time()-started)/1000),wire_status,(long long)fetched,read,(unsigned)complete);
     esp_http_client_close(h);esp_http_client_cleanup(h);return status;
 setup_failed:
     ESP_LOGW("dropbox","http op=%s setup=%s error=%s request_bytes=%u sent_bytes=0",op,stage,esp_err_to_name(setup),(unsigned)length);
