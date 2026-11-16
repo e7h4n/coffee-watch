@@ -83,8 +83,10 @@ static int http(const char *url,const char *body,size_t length,const char *type,
         char *auth=malloc(strlen(access_token)+8);if(!auth) {esp_http_client_cleanup(h);return -1;}
         sprintf(auth,"Bearer %s",access_token);esp_http_client_set_header(h,"Authorization",auth);mbedtls_platform_zeroize(auth,strlen(auth));free(auth);
     }
-    int status=-1;
-    if(esp_http_client_open(h,(int)length)==ESP_OK) {
+    ESP_LOGI("dropbox","TLS heap internal_free=%u internal_largest=%u psram_free=%u",(unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),(unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),(unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));
+    int status=-1;int64_t started=esp_timer_get_time();
+    esp_err_t opened=esp_http_client_open(h,(int)length);
+    if(opened==ESP_OK) {
         bool sent=true;
         for(size_t offset=0;offset<length;) {int written=esp_http_client_write(h,body+offset,(int)(length-offset));if(written<=0) {sent=false;break;}offset+=(size_t)written;}
         if(sent&&esp_http_client_fetch_headers(h)>=0) {
@@ -94,6 +96,8 @@ static int http(const char *url,const char *body,size_t length,const char *type,
             if(read>=0&&esp_http_client_is_complete_data_received(h))status=esp_http_client_get_status_code(h);
         }
     }
+    // Log only operation/status/transport metadata, never token bodies or headers.
+    ESP_LOGI("dropbox","http op=%s status=%d open=%s request_bytes=%u response_bytes=%u elapsed_ms=%lld",authorized?"upload":"token",status,esp_err_to_name(opened),(unsigned)length,(unsigned)strlen(response),(long long)((esp_timer_get_time()-started)/1000));
     esp_http_client_close(h);esp_http_client_cleanup(h);return status;
 }
 // application/x-www-form-urlencoded from name/value pairs (NULL-terminated); every value is percent-encoded.
@@ -144,7 +148,10 @@ static const char *token_response(bool initial) {
 }
 static bool refresh(void) {
     int status=post_form(form("grant_type","refresh_token","refresh_token",account.refresh,"client_id",account.key,"client_secret",account.secret,NULL));
-    return current()&&status==200&&!token_response(false);
+    if(!current()||status!=200)return false;
+    const char *error=token_response(false);
+    if(error)ESP_LOGW("dropbox","refresh response: %s",error);
+    return !error;
 }
 // Dropbox content_hash: SHA-256 of the concatenated SHA-256 digests of each 4 MiB block.
 static void content_hash(const uint8_t *data,size_t length,char out[65]) {

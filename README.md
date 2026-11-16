@@ -156,3 +156,16 @@ is confirmed, together with the brew's 10 Hz weight/temperature trace as a CSV,
 then updates the same record when a valid TDS measurement arrives. See
 [Brew records](spec/brew-record.md) and [Dropbox setup](spec/dropbox.md) for
 configuration, storage and verification details.
+
+TLS uses PSRAM (`CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y`) so BLE, the display and
+speaker DMA do not leave it without a large enough internal RAM block. For an
+existing build directory, select **External SPIRAM** under **Component config →
+mbedTLS → Memory allocation strategy** in `idf.py menuconfig`; changing defaults
+alone does not override a previously generated `sdkconfig`.
+
+Serial diagnostics: `dropbox status` reads the saved connection state;
+`dropbox check` refreshes authorization and uploads the existing
+`connection-check.json` test file, validating its returned content hash. Neither
+command erases credentials. Logs include HTTP status, request/response sizes and
+available TLS memory, never token response bodies or authorization headers.
+A passed connection check does not replace full brew/trace/TDS upload testing.

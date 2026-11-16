@@ -349,6 +349,13 @@ extern "C" void app_main() {
                     aux_count>1&&span>0?(aux_count-1)/span:0.0,(long long)(aux_max_gap_us/1000),(long long)(aux_count?(now-aux_last_us)/1000:-1));
             }
             else if(!strcmp(cmd.line,"beep")) {audio_chirp();puts("BEEP quiet 30ms requested");}
+            else if(!strcmp(cmd.line,"dropbox status")) {
+                char json[384];if(dropbox_setup_status(json,sizeof json)>0)printf("DROPBOX %s\n",json);
+            }
+            else if(!strcmp(cmd.line,"dropbox check")) {
+                cw_dropbox_command_t check={};check.op=3;
+                puts(dropbox_setup_submit(&check)?"DROPBOX check queued":"DROPBOX busy");
+            }
             else if(!strcmp(cmd.line,"mode"))printf("MODE %s sensor=%u scale=%u\n",app.mode==CW_APP_HOME?"home":app.mode==CW_APP_BREW?"brew":"color",app.sensor_present,flow.scale_ready);
             else if(!strcmp(cmd.line,"netstatus"))printf("NETWORK state=%u setup=%u paired=%u saved=%u reason=%d setup_error=%d\n",ui.network.state,ui.network.setup_active,ui.network.paired,ui.network.saved,ui.network.reason,ui.network.setup_error);
             else if(!strcmp(cmd.line,"status")) {
