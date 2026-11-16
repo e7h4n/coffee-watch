@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "ui.h"
+#include "audio.h"
 #include "design.h"
 #include "probe_trace.h"
 #include "color_mode.h"
@@ -26,6 +27,7 @@ static unsigned rs_epoch;
 static cw_record_tracker_t records;
 static bool render_needed=true,rs_requested;
 static int64_t network_activity_us;
+static unsigned slow_drip_seen;
 static int64_t animation_start;
 static int queued[16];static unsigned queue_read,queue_write;
 extern "C" void demo_post(const demo_event_t *event) {configASSERT(xQueueSend(events,event,0)==pdTRUE);}
@@ -55,10 +57,20 @@ static void turn_page(int dir,int64_t now) {
 // Brew trace: record from Ready through brewing; stop when the brew stops.
 // The brew mark is the detected pour onset, which precedes the trigger slightly.
 static cw_stage_t trace_stage=CW_HOME;
+static unsigned trace_total;
+// Two scales: the trace keeps both raw weights with the brew's zeros and roles; a brew
+// that ended too early (more water poured before the TDS) continues the same trace.
 static void trace_follow(int64_t us) {
-    if(flow.stage==trace_stage)return;
+    if(flow.stage==trace_stage) {
+        if(flow.dual&&flow.stage==CW_BREW&&flow.duo.total!=trace_total) {trace_total=flow.duo.total;probe_trace_roles(trace_total);}
+        return;
+    }
     if(flow.stage==CW_READY)probe_trace_start(us);
-    else if(flow.stage==CW_BREW&&trace_stage==CW_READY)probe_trace_brew(flow.onset_us,flow.zero_cg);
+    else if(flow.stage==CW_BREW&&trace_stage==CW_READY) {
+        if(flow.dual) {trace_total=flow.duo.total;probe_trace_brew_dual(flow.onset_us,flow.duo.zero,trace_total);}
+        else probe_trace_brew(flow.onset_us,flow.zero_cg);
+    }
+    else if(flow.stage==CW_BREW&&trace_stage==CW_TDS&&flow.dual)probe_trace_resume();
     else if(flow.stage!=CW_BREW)probe_trace_stop();
     trace_stage=flow.stage;
 }
@@ -76,6 +88,27 @@ static void go_home() {
 static void enter_color(int64_t now) {color_mode_enter(now);render_needed=true;ESP_LOGI("app","roast color");}
 // With the scale connected the brew flow already waits at the brewer carousel.
 static void enter_brew() {render_needed=true;ESP_LOGI("app","brew stage=%u",flow.stage);}
+// Either scale counts for Home: a new connection opens brewing, losing the last
+// one outside a brew returns Home.
+// A link with a new epoch is a scale's new connection; Home re-announces links that
+// were already up, and those must not reopen brewing.
+static unsigned scale_epoch_seen,aux_epoch_seen;
+static void app_link(bool fresh=false) {
+    bool idle=!flow.interrupted&&(flow.stage==CW_HOME||flow.stage==CW_BREWER);
+    cw_app_mode_t was=app.mode;cw_app_scale(&app,flow.scale_ready||flow.aux_ready,fresh,ui.wifi_setup,idle);
+    if(was==CW_APP_HOME&&app.mode==CW_APP_BREW)enter_brew();
+    else if(was==CW_APP_BREW&&app.mode==CW_APP_HOME)go_home();
+}
+// Display-only view of the two-scale brew and the connected scales.
+static void dual_view() {
+    ui.dual.scales=(flow.scale_ready?1:0)+(flow.aux_ready?1:0);
+    ui.dual.active=flow.dual&&(flow.stage==CW_BREW||flow.stage==CW_TDS||flow.stage==CW_REPORT)&&!flow.interrupted;
+    ui.dual.out_valid=flow.dual&&flow.stage==CW_BREW&&flow.duo.phase==CW_DUO_BREWING;
+    ui.dual.out_gps=flow.duo.out_cgps/100.f;
+    ui.dual.open_valid=ui.dual.active&&cw_brewer_immersion(flow.brewer)&&flow.duo.open_valid&&flow.duo.open_us>=flow.onset_us;
+    ui.dual.open_ms=ui.dual.open_valid?(uint32_t)((flow.duo.open_us-flow.onset_us)/1000):0;
+    snprintf(ui.home_scales,sizeof ui.home_scales,"%s",flow.scale_ready&&flow.aux_ready?"BOOKOO + LEFU":flow.scale_ready?"BOOKOO":flow.aux_ready?"LEFU":"");
+}
 static void animate(int dir) {
     if(app.mode!=CW_APP_BREW||flow.stage!=CW_BREWER)return;
     if(ui.carousel_dir) {if(queue_write-queue_read<16)queued[queue_write++%16]=dir;return;}
@@ -167,23 +200,45 @@ static void input_tick(BoardInput raw,int64_t now) {
     }
     if(old!=ui.held||prev_next!=in.next||prev_select!=in.select||raw.touch!=old_touch||old_gen!=flow.generation)render_needed=true;
 }
+// Second-scale notification statistics for the serial `scales` command.
+static unsigned aux_count;static int64_t aux_first_us,aux_last_us,aux_max_gap_us;
+// Scale and probe-clock transitions must publish the same draft/trace and start
+// RS discovery. In particular, a held CK811 reading can end on a probe tick.
+static void flow_follow(cw_stage_t before,int64_t us,bool record_event) {
+    trace_follow(us);
+    if(record_event) {
+        cw_brew_record_t record;
+        if(cw_record_event(&records,before,&flow,us,&record)) {
+            cw_record_status_t pending={};pending.state=CW_RECORD_SAVING;pending.revision=record.revision;snprintf(pending.id,sizeof pending.id,"%s",record.id);ui.record=pending;ui.record_visible=true;
+            dropbox_setup_record(&record,record.revision==1?probe_trace_snapshot():nullptr);
+        }
+    }
+    if(flow.stage==CW_TDS&&!rs_requested) {rs_requested=true;transport_find_rs();}
+    if(before!=flow.stage) {
+        ui.held=0;ui.result_page=0;ui.page_us=us;
+        ESP_LOGI("flow","stage=%u generation=%u brew=%u dose_valid=%u empty=%ld beverage=%ld",flow.stage,flow.generation,flow.scale.brew_id,flow.scale.dose_valid,(long)flow.empty_cg,(long)flow.beverage_cg);
+        if(flow.stage==CW_REPORT)ESP_LOGI("flow","REPORT dose=%.1f water=%.1f beverage=%.1f time_ms=%u tds=%.8f extraction=%.8f",flow.result.dose_cg/100.,flow.result.water_cg/100.,flow.beverage_cg/100.,(unsigned)flow.result.elapsed_ms,(double)flow.tds,(double)flow.extraction);
+    }
+}
 static void receive(const demo_event_t &e) {
     cw_stage_t before=flow.stage;
     switch(e.kind) {
-    case DE_SCALE_UP: {
-        cw_scale_link(&flow,true,e.epoch);
-        cw_app_mode_t was=app.mode;cw_app_scale(&app,true,ui.wifi_setup,true);
-        if(was==CW_APP_HOME&&app.mode==CW_APP_BREW)enter_brew();
-        break;
+    // Losing a scale before the pour restarts at the carousel (the flow does that);
+    // mid-brew it interrupts.
+    case DE_SCALE_UP: {bool fresh=e.epoch!=scale_epoch_seen;scale_epoch_seen=e.epoch;cw_scale_link(&flow,true,e.epoch);app_link(fresh);break;}
+    case DE_SCALE_DOWN:cw_scale_link(&flow,false,e.epoch);probe_trace_weight(false,0);app_link();break;
+    case DE_AUX_UP: {
+        bool fresh=e.epoch!=aux_epoch_seen;aux_epoch_seen=e.epoch;cw_aux_link(&flow,true,e.epoch);app_link(fresh);
+        ESP_LOGI("flow","second scale up fresh=%u dual=%u stage=%u",fresh,flow.dual,flow.stage);break;
     }
-    case DE_SCALE_DOWN: {
-        cw_scale_link(&flow,false,e.epoch);probe_trace_weight(false,0);
-        // Without a brew in progress, losing the scale returns Home; mid-brew it interrupts.
-        bool idle=!flow.interrupted&&(flow.stage==CW_HOME||flow.stage==CW_BREWER);
-        cw_app_mode_t was=app.mode;cw_app_scale(&app,false,ui.wifi_setup,idle);
-        if(was==CW_APP_BREW&&app.mode==CW_APP_HOME)go_home();
+    case DE_AUX_DOWN:cw_aux_link(&flow,false,e.epoch);probe_trace_aux(false,0);app_link();break;
+    case DE_AUX:
+        if(aux_count&&e.us>aux_last_us) {int64_t gap=e.us-aux_last_us;if(gap>aux_max_gap_us)aux_max_gap_us=gap;}
+        if(!aux_count)aux_first_us=e.us;
+        aux_count++;aux_last_us=e.us;
+        cw_aux_weight(&flow,e.epoch,e.data.aux_cg,e.us);
+        if(flow.aux_ready&&e.epoch==flow.aux_epoch)probe_trace_aux(true,flow.aux_cg);
         break;
-    }
     case DE_RS_UP:rs_epoch=e.epoch;cw_rs_link(&flow,true);break;
     case DE_RS_DOWN:cw_rs_link(&flow,false);if(flow.stage==CW_TDS)transport_find_rs();break;
     case DE_SCALE:
@@ -199,21 +254,7 @@ static void receive(const demo_event_t &e) {
         break;
     case DE_ERROR:snprintf(flow.error,sizeof flow.error,"%s",e.data.error);ESP_LOGE("flow","%s",flow.error);break;
     }
-    trace_follow(e.us);
-    if(e.kind==DE_SCALE||e.kind==DE_RS) {
-        cw_brew_record_t record;
-        if(cw_record_event(&records,before,&flow,e.us,&record)) {
-            cw_record_status_t pending={};pending.state=CW_RECORD_SAVING;pending.revision=record.revision;snprintf(pending.id,sizeof pending.id,"%s",record.id);ui.record=pending;ui.record_visible=true;
-            // The 10 Hz weight/temperature trace goes to Dropbox once, with the first draft.
-            dropbox_setup_record(&record,record.revision==1?probe_trace_snapshot():nullptr);
-        }
-    }
-    if(flow.stage==CW_TDS&&!rs_requested) {rs_requested=true;transport_find_rs();}
-    if(before!=flow.stage) {
-        ui.held=0;ui.result_page=0;ui.page_us=e.us;
-        ESP_LOGI("flow","stage=%u generation=%u brew=%u dose_valid=%u empty=%ld beverage=%ld",flow.stage,flow.generation,flow.scale.brew_id,flow.scale.dose_valid,(long)flow.empty_cg,(long)flow.beverage_cg);
-        if(flow.stage==CW_REPORT)ESP_LOGI("flow","REPORT dose=%.1f water=%.1f beverage=%.1f time_ms=%u tds=%.8f extraction=%.8f",flow.result.dose_cg/100.,flow.result.water_cg/100.,flow.beverage_cg/100.,(unsigned)flow.result.elapsed_ms,(double)flow.tds,(double)flow.extraction);
-    }
+    flow_follow(before,e.us,e.kind==DE_SCALE||e.kind==DE_RS||e.kind==DE_AUX);
     render_needed=true;
 }
 struct ConsoleCommand {char line[80];};
@@ -250,9 +291,7 @@ extern "C" void app_main() {
             probe_seq=probe.seq;cw_stage_t before=flow.stage;bool was_interrupted=flow.interrupted;
             cw_probe_message(&flow,probe.valid,probe.celsius,probe.us);
             if(flow.stage!=before) {
-                // Ready -> Brew allocates the record identity, as for scale-driven transitions.
-                cw_brew_record_t unused;cw_record_event(&records,before,&flow,probe.us,&unused);
-                trace_follow(probe.us);ui.held=0;ui.result_page=0;ui.page_us=probe.us;
+                flow_follow(before,probe.us,true);
                 ESP_LOGI("flow","stage=%u generation=%u zero=%ld onset=%lld",flow.stage,flow.generation,(long)flow.zero_cg,(long long)flow.onset_us);
             }
             if(flow.stage!=before||flow.interrupted!=was_interrupted)render_needed=true;
@@ -267,7 +306,7 @@ extern "C" void app_main() {
             if(app.sensor_present!=present)render_needed=true;
             if(app.mode==CW_APP_COLOR)enter_color(now);
         }
-        ui.home=app.mode==CW_APP_HOME;ui.home_scale=flow.scale_ready;ui.home_color=app.sensor_present;
+        ui.home=app.mode==CW_APP_HOME;ui.home_scale=flow.scale_ready||flow.aux_ready;ui.home_color=app.sensor_present;dual_view();
         if(app.mode==CW_APP_COLOR) {
             if(color_mode_tick(now))last_activity=now;
             if(color_mode_input(raw,now,ui))go_home();
@@ -276,11 +315,18 @@ extern "C" void app_main() {
                 color_mode_leave();cw_app_sensor_lost(&app);go_home();
             }
         } else input_tick(raw,now);
-        // A brew session that ends without a scale (Back from Waiting TDS with the scale off) is Home.
-        if(app.mode==CW_APP_BREW&&flow.stage==CW_HOME&&!flow.interrupted)go_home();
+        // A brew session that ends with no scale at all (Back from Waiting TDS with the
+        // scale off) is Home; with the second scale alone the brew waits for BOOKOO.
+        if(app.mode==CW_APP_BREW&&flow.stage==CW_HOME&&!flow.interrupted&&!flow.aux_ready)go_home();
         if(app.mode!=last_mode) {last_mode=app.mode;last_activity=now;render_needed=true;}
-        ui.home=app.mode==CW_APP_HOME;ui.home_scale=flow.scale_ready;ui.home_color=app.sensor_present;
+        ui.home=app.mode==CW_APP_HOME;ui.home_scale=flow.scale_ready||flow.aux_ready;ui.home_color=app.sensor_present;dual_view();
         trace_follow(now);
+        if(flow.duo.slow_drip_seq!=slow_drip_seen) {
+            slow_drip_seen=flow.duo.slow_drip_seq;
+            if(flow.dual&&flow.stage==CW_BREW&&!flow.interrupted&&slow_drip_seen) {
+                audio_chirp();ESP_LOGI("flow","slow-drip hint seq=%u out_cg=%ld",slow_drip_seen,(long)flow.duo.out_cg);
+            }
+        }
         if(now-last_battery>=1000000) {
             last_battery=now;battery_percent=board_battery_percent();
         }
@@ -297,9 +343,19 @@ extern "C" void app_main() {
         if(xQueueReceive(console_commands,&cmd,0)==pdTRUE) {
             if(app.mode==CW_APP_COLOR&&color_mode_console(cmd.line,now))last_activity=now;
             else if(!strcmp(cmd.line,"screen"))board_dump();
+            else if(!strcmp(cmd.line,"scales")) {
+                double span=(aux_last_us-aux_first_us)/1e6;
+                printf("SCALES bookoo=%u aux=%u aux_cg=%ld aux_count=%u aux_hz=%.2f aux_max_gap_ms=%lld aux_last_ms_ago=%lld\n",flow.scale_ready,flow.aux_ready,(long)flow.aux_cg,aux_count,
+                    aux_count>1&&span>0?(aux_count-1)/span:0.0,(long long)(aux_max_gap_us/1000),(long long)(aux_count?(now-aux_last_us)/1000:-1));
+            }
+            else if(!strcmp(cmd.line,"beep")) {audio_chirp();puts("BEEP quiet 30ms requested");}
             else if(!strcmp(cmd.line,"mode"))printf("MODE %s sensor=%u scale=%u\n",app.mode==CW_APP_HOME?"home":app.mode==CW_APP_BREW?"brew":"color",app.sensor_present,flow.scale_ready);
             else if(!strcmp(cmd.line,"netstatus"))printf("NETWORK state=%u setup=%u paired=%u saved=%u reason=%d setup_error=%d\n",ui.network.state,ui.network.setup_active,ui.network.paired,ui.network.saved,ui.network.reason,ui.network.setup_error);
-            else if(!strcmp(cmd.line,"status"))printf("STATUS stage=%u generation=%u scale=%u rs=%u phase=%u dose_valid=%u dose_cg=%ld weight_cg=%ld empty_cg=%ld beverage_cg=%ld\n",flow.stage,flow.generation,flow.scale_ready,flow.rs_ready,flow.scale.phase,flow.scale.dose_valid,(long)flow.scale.dose_cg,(long)flow.live_cg,(long)flow.empty_cg,(long)flow.beverage_cg);
+            else if(!strcmp(cmd.line,"status")) {
+                printf("STATUS stage=%u generation=%u scale=%u rs=%u phase=%u dose_valid=%u dose_cg=%ld weight_cg=%ld empty_cg=%ld beverage_cg=%ld\n",flow.stage,flow.generation,flow.scale_ready,flow.rs_ready,flow.scale.phase,flow.scale.dose_valid,(long)flow.scale.dose_cg,(long)flow.live_cg,(long)flow.empty_cg,(long)flow.beverage_cg);
+                printf("DUAL aux=%u aux_cg=%ld dual=%u phase=%u total=%u water_cg=%ld out_cg=%ld out_cgps=%ld peak_cgps=%ld open=%u\n",flow.aux_ready,(long)flow.aux_cg,flow.dual,flow.duo.phase,flow.duo.total,
+                    (long)flow.duo.water_cg,(long)flow.duo.out_cg,(long)flow.duo.out_cgps,(long)flow.duo.peak_cgps,flow.duo.open_valid);
+            }
             else if(!strcmp(cmd.line,"probe")) {
                 probe_reading_t p;probe_trace_reading(&p);
                 printf("PROBE valid=%u celsius=%.2f ratio=%.4f ntc_mv=%d ref_mv=%d trace_active=%u brew_started=%u samples=%u truncated=%u\n",p.valid,(double)p.celsius,(double)p.ratio,p.ntc_mv,p.ref_mv,p.active,p.brew_started,p.count,p.truncated);

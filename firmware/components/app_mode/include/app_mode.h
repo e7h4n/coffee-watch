@@ -15,9 +15,12 @@ typedef struct {cw_app_mode_t mode;bool scale_ready,sensor_present;} cw_app_t;
 void cw_app_init(cw_app_t *a);
 // Color-sensor presence, polled only while on Home.
 void cw_app_sensor(cw_app_t *a,bool present,bool setup_open);
-// Scale link changes. brew_idle: the brew flow is at its start (no brew in progress),
-// so losing the scale there returns Home; a brew in progress keeps its interruption.
-void cw_app_scale(cw_app_t *a,bool connected,bool setup_open,bool brew_idle);
+// Scale link changes; connected means any scale. fresh: this event is a scale's new
+// connection (not a repeat of a link that was already up), which enters brewing from
+// Home even when another scale was already connected. brew_idle: the brew flow is at
+// its start (no brew in progress), so losing the last scale there returns Home; a
+// brew in progress keeps its interruption.
+void cw_app_scale(cw_app_t *a,bool connected,bool fresh,bool setup_open,bool brew_idle);
 // Explicit Home (both keys held, or Back from the brewer carousel).
 void cw_app_home(cw_app_t *a);
 // A Home choice; only a connected device can be chosen. Returns whether the mode changed.

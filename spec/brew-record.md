@@ -106,11 +106,14 @@ dilution), calculated as TDS / (100 − TDS) × added water / dry dose × 100; a
 any record can still be recomputed from `tds_percent`, `beverage_g` and `dose_g`.
 Schema v1 records have no `extraction_formula` and always used the beverage
 formula. Schema v3 adds `probe_trace`; it is `null` only if no trace was
-recorded for the brew.
+recorded for the brew. Schema v4 adds `scales` (1, or 2 for
+[two-scale brewing](two-scales.md)), `drain_start_ms` (two scales, Switch/AeroPress
+drain start after the pour, else null) and `peak_out_flow_gps`; a two-scale trace
+lists `out_g` (beverage) in its columns and its `weight_g` is the added water.
 
 ```json
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "id": "020000000001-0123456789abcdef-00000001",
   "revision": 1,
   "created_at": "2026-11-02T08:00:00Z",
@@ -128,6 +131,9 @@ recorded for the brew.
   "extraction_percent": null,
   "sample_temperature_c": null,
   "refractive_index": null,
+  "scales": 1,
+  "drain_start_ms": null,
+  "peak_out_flow_gps": null,
   "probe_trace": {
     "path": "/brew-020000000001-0123456789abcdef-00000001-trace.csv",
     "sample_rate_hz": 10,

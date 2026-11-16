@@ -15,7 +15,7 @@ class AppModeNativeTests(unittest.TestCase):
                             str(root / 'app_mode/test/test_app_mode.c'), '-o', executable],
                            check=True, capture_output=True, text=True, timeout=60)
             result = subprocess.run([executable], check=True, capture_output=True, text=True, timeout=10)
-            self.assertIn('5 app mode scenarios passed', result.stdout)
+            self.assertIn('6 app mode scenarios passed', result.stdout)
 
 
 if __name__ == '__main__':

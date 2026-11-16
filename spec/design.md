@@ -76,6 +76,10 @@ business state or reset the 10-minute idle timer. No other device is queried.
   (18). A connected device's tile is filled with the button color and an accent
   label (accent fill while pressed); otherwise it is an outline with muted text.
   Wi-Fi setup is the bottom action.
+- Two-scale brewing: `2 scales` (18) at y=66 on Ready and Brewing; Ratio, Bed and
+  Out labels at x=120/234/348 with 34px values (Out in the beverage colour #78a39b);
+  the beverage band (#29423f, edge #78a39b) sits in front of the water steps; a
+  dashed beverage-colour line marks the drain start, labelled `Open` on the curve page.
 - Brewer carousel: cyclic positioning, scaling and easing with queued input.
 - Roast color pages: caption (26) at y=124, the index as the 90px hero at y=214
   (live in foreground while measuring, accent once recorded), the group's readings

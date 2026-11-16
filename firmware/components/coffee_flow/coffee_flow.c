@@ -11,18 +11,32 @@ void cw_init(cw_flow_t *s) {memset(s,0,sizeof *s);bookoo_session_init(&s->scale)
 void cw_home(cw_flow_t *s) {
     bool connected=s->scale_ready,rs=s->rs_ready;unsigned generation=s->generation+1,brewer=s->brewer;
     bookoo_session_t device=s->scale;
+    bool aux=s->aux_ready,aux_valid=s->aux_valid;int32_t aux_cg=s->aux_cg;unsigned aux_epoch=s->aux_epoch;
     cw_init(s);s->generation=generation;s->rs_ready=rs;s->brewer=brewer;
+    s->aux_ready=aux;s->aux_valid=aux_valid;s->aux_cg=aux_cg;s->aux_epoch=aux_epoch;
     if(connected) {s->scale_ready=true;s->scale=device;bookoo_session_begin(&s->scale);s->stage=CW_BREWER;}
+}
+static bool before_pour(cw_stage_t stage) {return stage==CW_EMPTY||stage==CW_PREP||stage==CW_READY;}
+// Losing a scale before the pour starts over at the brewer carousel.
+static void restart(cw_flow_t *s) {
+    s->dual=false;s->initial_step=0;s->write_pending=false;s->empty_valid=false;
+    if(s->scale_ready)bookoo_session_begin(&s->scale);
+    change(s,CW_BREWER);
 }
 void cw_scale_link(cw_flow_t *s,bool connected,unsigned epoch) {
     s->scale_ready=connected;s->live_valid=false;clear_stable(s);s->write_pending=false;
     if(connected) {bookoo_session_connect(&s->scale,epoch);if(s->stage==CW_HOME&&!s->interrupted)change(s,CW_BREWER);}
-    else {bookoo_session_disconnect(&s->scale);s->interrupted=s->stage!=CW_HOME&&s->stage!=CW_BREWER&&s->stage!=CW_TDS&&s->stage!=CW_REPORT;}
+    else {
+        bookoo_session_disconnect(&s->scale);
+        if(before_pour(s->stage)&&!s->interrupted) {restart(s);return;}
+        s->interrupted=s->stage!=CW_HOME&&s->stage!=CW_BREWER&&s->stage!=CW_TDS&&s->stage!=CW_REPORT;
+    }
 }
 void cw_rs_link(cw_flow_t *s,bool connected) {s->rs_ready=connected;}
 void cw_choose(cw_flow_t *s,unsigned brewer) {
     if(s->stage!=CW_BREWER||!s->scale_ready)return;
-    s->brewer=brewer%4;bookoo_session_begin(&s->scale);s->live_valid=false;s->initial_step=1;change(s,CW_EMPTY);
+    s->brewer=brewer%4;bookoo_session_begin(&s->scale);s->live_valid=false;s->initial_step=1;
+    s->dual=s->aux_ready;cw_duo_reset(&s->duo);change(s,CW_EMPTY);
 }
 bool cw_initial_request(cw_flow_t *s,uint8_t packet[6]) {
     if(!packet||!s->scale_ready||s->interrupted||s->write_pending||s->stage!=CW_EMPTY)return false;
@@ -52,8 +66,63 @@ static bool stable(cw_flow_t *s,int32_t value,int64_t us,int64_t duration,int32_
 // stored dose are known; there is no Start action. Earlier triggers never count, and
 // the temperature baseline restarts so a probe still warm from a rinse cannot.
 static void arm(cw_flow_t *s) {
-    if(s->stage!=CW_PREP||!s->empty_valid||!s->scale_ready||s->interrupted||!s->scale.dose_valid)return;
-    cw_pour_rearm(&s->pour);change(s,CW_READY);
+    if(s->stage!=CW_PREP||!(s->empty_valid||s->dual)||!s->scale_ready||s->interrupted||!s->scale.dose_valid)return;
+    if(s->dual&&!s->aux_ready)return;
+    if(s->dual)cw_duo_rearm(&s->duo);else cw_pour_rearm(&s->pour);
+    change(s,CW_READY);
+}
+// Two scales need no empty server: preparation goes straight to the dose and Ready.
+static void go_dual(cw_flow_t *s) {
+    s->dual=true;
+    // During the scale initialization cw_write_done continues from here.
+    if(s->stage==CW_EMPTY&&(s->initial_step||s->write_pending))return;
+    cw_duo_reset(&s->duo);cw_duo_rearm(&s->duo);change(s,CW_PREP);arm(s);
+}
+static void dual_result(cw_flow_t *s,int64_t us) {
+    const cw_duo_t *d=&s->duo;
+    int32_t water=cw_mass_cg(d->end_water),beverage=cw_mass_cg(d->end_out);
+    s->result=(cw_result_t){.elapsed_ms=d->end_us>s->onset_us?(uint32_t)((d->end_us-s->onset_us)/1000):0,
+        .dose_cg=s->brew_dose_cg,.water_cg=water,.dose_valid=s->brew_dose_valid&&s->brew_dose_cg>0,.water_valid=water>0};
+    s->result_valid=true;
+    if(!s->result.water_valid||!s->result.dose_valid||beverage<=0) {s->interrupted=true;snprintf(s->error,sizeof s->error,"Invalid brew result");return;}
+    s->ratio=(float)water/s->brew_dose_cg;s->beverage_cg=beverage;s->beverage_valid=true;
+    change(s,CW_TDS);s->wait_tds_us=us;
+}
+// Every weight from either scale drives the two-scale brew: start, end, late drips, resume.
+static void dual_step(cw_flow_t *s,int64_t us) {
+    if(s->stage==CW_READY) {
+        cw_duo_start_t r=cw_duo_check(&s->duo,us);
+        if(r==CW_DUO_NO_ZERO) {s->interrupted=true;snprintf(s->error,sizeof s->error,"No stable weight before pour");return;}
+        if(r!=CW_DUO_START)return;
+        s->zero_cg=0;s->onset_us=s->duo.onset_us;s->brew_dose_cg=s->scale.dose_cg;s->brew_dose_valid=true;
+        s->level_valid=false;s->result_valid=false;s->beverage_valid=false;change(s,CW_BREW);return;
+    }
+    if(s->stage!=CW_BREW&&s->stage!=CW_TDS)return;
+    cw_duo_event_t e=cw_duo_step(&s->duo,us);
+    if(s->stage==CW_BREW&&e==CW_DUO_LIFTED) {dual_result(s,us);return;}
+    if(s->stage!=CW_TDS)return;
+    if(e==CW_DUO_RESUMED) {s->result_valid=false;s->beverage_valid=false;change(s,CW_BREW);return;}
+    // Late drips until the TDS arrives, unless the server was lifted.
+    int32_t beverage=cw_mass_cg(s->duo.end_out);
+    if(beverage>s->beverage_cg)s->beverage_cg=beverage;
+}
+int32_t cw_brew_water(const cw_flow_t *s) {return s->dual?cw_mass_cg(s->duo.water_cg):s->live_cg-s->zero_cg;}
+void cw_aux_link(cw_flow_t *s,bool connected,unsigned epoch) {
+    s->aux_ready=connected;s->aux_valid=false;
+    if(connected) {
+        s->aux_epoch=epoch;
+        if(before_pour(s->stage)&&!s->dual&&s->scale_ready&&!s->interrupted)go_dual(s);
+        return;
+    }
+    if(!s->dual)return;
+    if(before_pour(s->stage)&&!s->interrupted) {restart(s);return;}
+    if((s->stage==CW_BREW)&&!s->interrupted) {s->interrupted=true;snprintf(s->error,sizeof s->error,"Second scale disconnected");}
+}
+void cw_aux_weight(cw_flow_t *s,unsigned epoch,int32_t weight_cg,int64_t us) {
+    if(!s->aux_ready||epoch!=s->aux_epoch)return;
+    s->aux_cg=cw_mass_cg(weight_cg);s->aux_valid=true;
+    if(!s->dual||s->interrupted)return;
+    if(s->stage==CW_PREP||s->stage==CW_READY||s->stage==CW_BREW||s->stage==CW_TDS) {cw_duo_weight(&s->duo,1,us,s->aux_cg);dual_step(s,us);}
 }
 static bool watched(cw_stage_t stage) {return stage==CW_PREP||stage==CW_READY||stage==CW_BREW||stage==CW_BEVERAGE;}
 static void pour_step(cw_flow_t *s,int64_t us) {
@@ -103,6 +172,10 @@ void cw_scale_message(cw_flow_t *s,unsigned epoch,const bookoo_message_t *m,int6
     }
     if(m->kind!=BOOKOO_WEIGHT)return;
     s->live_cg=m->weight_cg;s->live_valid=true;
+    if(s->dual) {
+        if(s->stage==CW_PREP||s->stage==CW_READY||s->stage==CW_BREW||s->stage==CW_TDS) {cw_duo_weight(&s->duo,0,us,s->live_cg);dual_step(s,us);}
+        return;
+    }
     if(before==CW_PREP||before==CW_READY)cw_pour_weight(&s->pour,us,s->live_cg);
     if(!s->write_pending&&!s->initial_step&&before==CW_EMPTY) {
         if(stable(s,s->live_cg,us,5000000,1000)) {s->empty_cg=s->live_cg;s->empty_valid=true;cw_pour_reset(&s->pour);change(s,CW_PREP);arm(s);}
@@ -117,7 +190,11 @@ void cw_scale_message(cw_flow_t *s,unsigned epoch,const bookoo_message_t *m,int6
     }
 }
 void cw_probe_message(cw_flow_t *s,bool valid,float celsius,int64_t us) {
-    if(s->interrupted||!s->scale_ready||(s->stage!=CW_PREP&&s->stage!=CW_READY))return;
+    if(s->interrupted||!s->scale_ready)return;
+    if(s->dual&&(s->stage==CW_PREP||s->stage==CW_READY||s->stage==CW_BREW||s->stage==CW_TDS)) {
+        cw_duo_probe(&s->duo,us,valid,celsius);dual_step(s,us);return;
+    }
+    if(s->stage!=CW_PREP&&s->stage!=CW_READY)return;
     cw_pour_probe(&s->pour,us,valid,celsius);
     if(s->stage==CW_READY)pour_step(s,us);
 }
@@ -144,6 +221,7 @@ bool cw_reset_dispatch(cw_flow_t *s,uint8_t packet[6]) {
 void cw_write_done(cw_flow_t *s,bool success) {
     s->write_pending=false;clear_stable(s);
     if(success&&s->initial_step==6)s->initial_step=0;
+    if(success&&!s->initial_step&&s->dual&&s->stage==CW_EMPTY&&!s->interrupted)go_dual(s);
     if(!success&&s->initial_step)s->interrupted=true;
     if(!success) {bookoo_session_write_failed(&s->scale);snprintf(s->error,sizeof s->error,"Scale write failed");}
 }
@@ -153,6 +231,13 @@ void cw_revisit_stopped(cw_flow_t *s) {
 }
 void cw_back(cw_flow_t *s) {
     if(s->stage==CW_REPORT||s->stage==CW_BREWER||s->interrupted) {cw_home(s);return;}
+    if(s->dual) {
+        // Two scales have no empty-server step: Back from preparation is the carousel,
+        // from a brew it re-arms, and from Waiting TDS it measures the brew again.
+        if(s->stage==CW_EMPTY||s->stage==CW_PREP||s->stage==CW_READY) {restart(s);return;}
+        if(s->stage==CW_BREW) {s->result_valid=false;change(s,CW_PREP);arm(s);return;}
+        if(s->stage==CW_TDS) {s->duo.phase=CW_DUO_BREWING;s->result_valid=false;s->beverage_valid=false;change(s,CW_BREW);return;}
+    }
     if(s->stage==CW_EMPTY) {s->initial_step=0;bookoo_session_begin(&s->scale);s->empty_valid=false;change(s,CW_BREWER);return;}
     if(s->stage==CW_PREP) {bookoo_session_begin(&s->scale);s->empty_valid=false;change(s,CW_EMPTY);return;}
     // Nothing was sent to the scale while Ready or brewing, so Back acts at once.

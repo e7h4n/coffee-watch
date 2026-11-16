@@ -16,6 +16,11 @@ void probe_trace_brew(int64_t us,int32_t zero_cg);
 void probe_trace_stop(void);
 // Latest scale weight in centigrams (product rounding already applied).
 void probe_trace_weight(bool valid,int32_t weight_cg);
+// Two scales: the second scale's weight, the brew's zeros and roles (see brew_trace.h).
+void probe_trace_aux(bool valid,int32_t weight_cg);
+void probe_trace_brew_dual(int64_t us,const int32_t zero[2],unsigned total);
+void probe_trace_roles(unsigned total);
+void probe_trace_resume(void);
 // Copy of a stopped trace that reached the brew start; NULL if none or out of memory.
 // The caller owns it and releases it with free().
 cw_trace_snapshot_t *probe_trace_snapshot(void);
@@ -24,6 +29,9 @@ typedef struct {bool valid,active,brew_started,truncated;float celsius,ratio;int
 // Brew-screen chart columns (see cw_trace_series); also reports elapsed time and axis span.
 size_t probe_trace_chart(size_t columns,int16_t *probe_cc,int32_t *weight_cg,uint32_t *elapsed_ms,uint32_t *span_ms);
 void probe_trace_reading(probe_reading_t *out);
+// Two scales: beverage on the same chart columns (cg since the pour; CW_TRACE_NO_WEIGHT
+// where missing). Returns the number of columns, 0 with a single scale.
+size_t probe_trace_out_chart(size_t columns,int32_t *out_cg);
 #ifdef __cplusplus
 }
 #endif

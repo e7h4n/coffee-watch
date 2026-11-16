@@ -3,6 +3,7 @@
 #include "bookoo.h"
 #include "difluid_rs.h"
 #include "pour.h"
+#include "duo.h"
 typedef enum {CW_HOME,CW_BREWER,CW_EMPTY,CW_PREP,CW_BREW,CW_BEVERAGE,CW_TDS,CW_REPORT,CW_READY} cw_stage_t;
 // Carousel order; record and UI names use the same indices.
 typedef enum {CW_V60,CW_SWITCH,CW_AEROPRESS,CW_HOOP} cw_brewer_t;
@@ -26,6 +27,11 @@ typedef struct {
     float tds,temperature,refraction,extraction,retention,ratio;
     int64_t wait_tds_us;
     char error[64];
+    // Second scale (Lefu CK811). With both scales connected before the pour the brew
+    // needs no empty server: water and beverage come from the two scales (duo.h).
+    bool aux_ready,aux_valid;int32_t aux_cg;unsigned aux_epoch;
+    bool dual;
+    cw_duo_t duo;
 } cw_flow_t;
 // Centigrams rounded half away from zero to the product precision, 0.1g.
 int32_t cw_mass_cg(int32_t value);
@@ -56,4 +62,11 @@ void cw_write_done(cw_flow_t *s,bool success);
 // There is no Start action: preparation arms pour detection (Ready) by itself
 // once the empty server and the stored dose are known. No scale command is sent.
 void cw_back(cw_flow_t *s);
+// Second scale. Connecting it before the pour switches preparation to two scales,
+// even after the empty server was weighed; losing either scale before the pour
+// returns to the brewer carousel (Home when none is left); during a brew it interrupts.
+void cw_aux_link(cw_flow_t *s,bool connected,unsigned epoch);
+void cw_aux_weight(cw_flow_t *s,unsigned epoch,int32_t weight_cg,int64_t us);
+// Added water while brewing, from the scale or scales in use.
+int32_t cw_brew_water(const cw_flow_t *s);
 void cw_revisit_stopped(cw_flow_t *s);

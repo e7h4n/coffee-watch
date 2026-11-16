@@ -16,7 +16,7 @@ int16_t cw_probe_cc(double c) {
     return (int16_t)(c>=0?floor(c*100+.5):-floor(-c*100+.5));
 }
 void cw_trace_init(cw_trace_t *t,cw_trace_sample_t *storage,size_t capacity) {memset(t,0,sizeof *t);t->samples=storage;t->capacity=storage?capacity:0;}
-void cw_trace_start(cw_trace_t *t,int64_t us) {t->count=0;t->active=true;t->brew_started=t->truncated=false;t->start_us=us;t->brew_ms=0;t->zero_cg=0;}
+void cw_trace_start(cw_trace_t *t,int64_t us) {t->count=0;t->active=true;t->brew_started=t->truncated=t->dual=false;t->start_us=us;t->brew_ms=0;t->zero_cg=0;t->total=0;t->zero[0]=t->zero[1]=0;}
 void cw_trace_brew(cw_trace_t *t,int64_t us,int32_t zero_cg) {
     if(!t->active||t->brew_started)return;
     // The pour onset is found after the fact and can precede Start by a few
@@ -25,7 +25,23 @@ void cw_trace_brew(cw_trace_t *t,int64_t us,int32_t zero_cg) {
     t->zero_cg=zero_cg;t->brew_started=true;t->brew_ms=(uint32_t)((us-t->start_us)/1000);
 }
 void cw_trace_stop(cw_trace_t *t) {t->active=false;}
-bool cw_trace_append(cw_trace_t *t,int64_t us,int32_t weight_cg,int16_t probe_cc) {
+void cw_trace_brew_dual(cw_trace_t *t,int64_t us,const int32_t zero[2],unsigned total) {
+    if(!t->active||t->brew_started)return;
+    cw_trace_brew(t,us,zero[0]);t->dual=true;t->zero[0]=zero[0];t->zero[1]=zero[1];t->total=total&1;
+}
+void cw_trace_roles(cw_trace_t *t,unsigned total) {t->total=total&1;}
+void cw_trace_resume(cw_trace_t *t) {if(t->brew_started)t->active=true;}
+static int32_t raw(const cw_trace_sample_t *s,unsigned k) {return k?s->aux_cg:s->weight_cg;}
+int32_t cw_trace_water(const cw_trace_t *t,const cw_trace_sample_t *s) {
+    if(!t->dual)return s->weight_cg==CW_TRACE_NO_WEIGHT?CW_TRACE_NO_WEIGHT:s->weight_cg-t->zero_cg;
+    int32_t v=raw(s,t->total);return v==CW_TRACE_NO_WEIGHT?CW_TRACE_NO_WEIGHT:v-t->zero[t->total];
+}
+int32_t cw_trace_out(const cw_trace_t *t,const cw_trace_sample_t *s) {
+    if(!t->dual)return CW_TRACE_NO_WEIGHT;
+    unsigned cup=1-t->total;int32_t v=raw(s,cup);return v==CW_TRACE_NO_WEIGHT?CW_TRACE_NO_WEIGHT:v-t->zero[cup];
+}
+bool cw_trace_append(cw_trace_t *t,int64_t us,int32_t weight_cg,int16_t probe_cc) {return cw_trace_append_aux(t,us,weight_cg,CW_TRACE_NO_WEIGHT,probe_cc);}
+bool cw_trace_append_aux(cw_trace_t *t,int64_t us,int32_t weight_cg,int32_t aux_cg,int16_t probe_cc) {
     if(!t->active||us<t->start_us)return false;
     if(!t->brew_started&&t->capacity>=2*CW_TRACE_PREROLL&&t->count>=2*CW_TRACE_PREROLL) {
         // Drop the oldest pre-roll and re-base time on the first kept sample.
@@ -36,21 +52,27 @@ bool cw_trace_append(cw_trace_t *t,int64_t us,int32_t weight_cg,int16_t probe_cc
         t->start_us+=(int64_t)cut*1000;
     }
     if(t->count>=t->capacity) {t->truncated=true;return false;}
-    t->samples[t->count++]=(cw_trace_sample_t){.t_ms=(uint32_t)((us-t->start_us)/1000),.weight_cg=weight_cg,.probe_cc=probe_cc};
+    t->samples[t->count++]=(cw_trace_sample_t){.t_ms=(uint32_t)((us-t->start_us)/1000),.weight_cg=weight_cg,.aux_cg=aux_cg,.probe_cc=probe_cc};
     return true;
 }
-size_t cw_trace_csv_bound(size_t count) {return 32+count*40;}
+size_t cw_trace_csv_bound(size_t count) {return 40+count*52;}
 static int32_t tenth_cg(int32_t v) {return (int32_t)((v>=0?((int64_t)v+5)/10:-((-(int64_t)v+5)/10)));}
-int cw_trace_csv(const cw_trace_sample_t *s,size_t count,uint32_t brew_ms,char *out,size_t cap) {
+static void grams(int32_t cg,char *out,size_t size) {
+    out[0]=0;if(cg==CW_TRACE_NO_WEIGHT)return;
+    int32_t d=tenth_cg(cg);snprintf(out,size,"%s%ld.%ld",d<0?"-":"",(long)(d<0?-d:d)/10,(long)(d<0?-d:d)%10);
+}
+int cw_trace_csv(const cw_trace_sample_t *s,size_t count,uint32_t brew_ms,bool dual,char *out,size_t cap) {
     if(!out||(!s&&count))return -1;
-    size_t used=0;int n=snprintf(out,cap,"t_ms,weight_g,probe_c\n");
+    size_t used=0;int n=snprintf(out,cap,dual?"t_ms,weight_g,probe_c,out_g\n":"t_ms,weight_g,probe_c\n");
     if(n<0||(size_t)n>=cap)return -1;
     used=(size_t)n;
     for(size_t i=0;i<count;i++) {
-        char weight[16]="",probe[16]="";
-        if(s[i].weight_cg!=CW_TRACE_NO_WEIGHT) {int32_t d=tenth_cg(s[i].weight_cg);snprintf(weight,sizeof weight,"%s%ld.%ld",d<0?"-":"",(long)(d<0?-d:d)/10,(long)(d<0?-d:d)%10);}
+        char weight[16],probe[16]="",beverage[16]="";
+        grams(s[i].weight_cg,weight,sizeof weight);
+        if(dual)grams(s[i].aux_cg,beverage,sizeof beverage);
         if(s[i].probe_cc!=CW_TRACE_NO_PROBE) {int v=s[i].probe_cc;snprintf(probe,sizeof probe,"%s%d.%02d",v<0?"-":"",(v<0?-v:v)/100,(v<0?-v:v)%100);}
-        n=snprintf(out+used,cap-used,"%lld,%s,%s\n",(long long)s[i].t_ms-(long long)brew_ms,weight,probe);
+        if(dual)n=snprintf(out+used,cap-used,"%lld,%s,%s,%s\n",(long long)s[i].t_ms-(long long)brew_ms,weight,probe,beverage);
+        else n=snprintf(out+used,cap-used,"%lld,%s,%s\n",(long long)s[i].t_ms-(long long)brew_ms,weight,probe);
         if(n<0||(size_t)n>=cap-used)return -1;
         used+=(size_t)n;
     }
@@ -75,7 +97,20 @@ size_t cw_trace_series(const cw_trace_t *t,uint32_t span_ms,size_t columns,int16
         if(s->t_ms<t->brew_ms)continue;
         uint64_t column=(uint64_t)(s->t_ms-t->brew_ms)*columns/span_ms;
         if(column>=columns)break;
-        probe_cc[column]=s->probe_cc;weight_cg[column]=s->weight_cg==CW_TRACE_NO_WEIGHT?CW_TRACE_NO_WEIGHT:s->weight_cg-t->zero_cg;used=(size_t)column+1;
+        probe_cc[column]=s->probe_cc;weight_cg[column]=cw_trace_water(t,s);used=(size_t)column+1;
+    }
+    return used;
+}
+size_t cw_trace_out_series(const cw_trace_t *t,uint32_t span_ms,size_t columns,int32_t *out_cg) {
+    for(size_t i=0;i<columns;i++)out_cg[i]=CW_TRACE_NO_WEIGHT;
+    if(!t->dual||!t->brew_started||!columns||!span_ms)return 0;
+    size_t used=0;
+    for(size_t i=0;i<t->count;i++) {
+        const cw_trace_sample_t *s=&t->samples[i];
+        if(s->t_ms<t->brew_ms)continue;
+        uint64_t column=(uint64_t)(s->t_ms-t->brew_ms)*columns/span_ms;
+        if(column>=columns)break;
+        out_cg[column]=cw_trace_out(t,s);used=(size_t)column+1;
     }
     return used;
 }

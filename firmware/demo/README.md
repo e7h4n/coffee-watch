@@ -33,6 +33,9 @@ assistant, a MAX30101 roast-color sensor on G5 (SDA) / G6 (SCL) opens roast colo
 mode (`main/color_mode.cpp`, `main/color_sensor.c`); see
 [Roast color mode](../../spec/colorimeter.md) for its rules and serial commands.
 
+The second scale (Lefu CK811, `firmware/components/ck811`) is found by its advertised
+name and both scales reconnect by themselves; see [Two-scale brewing](../../spec/two-scales.md).
+
 The demo is paired to the two physical BLE addresses already verified in transport.c. It is not a general device-picker or configuration product.
 Start serial capture before connecting BLE; closing USB can reset StopWatch.
 

@@ -22,7 +22,7 @@ static adc_channel_t ntc_channel,ref_channel;
 static adc_cali_handle_t ntc_cali,ref_cali;
 static SemaphoreHandle_t lock;
 static cw_trace_t trace;
-static int32_t weight_cg=CW_TRACE_NO_WEIGHT;
+static int32_t weight_cg=CW_TRACE_NO_WEIGHT,aux_cg=CW_TRACE_NO_WEIGHT;
 static probe_reading_t latest;
 static adc_cali_handle_t calibration(adc_channel_t channel) {
     adc_cali_handle_t handle=NULL;
@@ -56,7 +56,7 @@ static void probe_task(void *arg) {
         double ratio=ok&&ref>200?(double)ntc/ref:NAN,celsius=saturated?NAN:cw_probe_celsius(ratio);
         int64_t now=esp_timer_get_time();
         xSemaphoreTake(lock,portMAX_DELAY);
-        cw_trace_append(&trace,now,weight_cg,cw_probe_cc(celsius));
+        cw_trace_append_aux(&trace,now,weight_cg,aux_cg,cw_probe_cc(celsius));
         unsigned seq=latest.seq+1;
         latest=(probe_reading_t){.valid=isfinite(celsius),.active=trace.active,.brew_started=trace.brew_started,.truncated=trace.truncated,
             .celsius=(float)celsius,.ratio=(float)ratio,.ntc_mv=ntc,.ref_mv=ref,.count=(unsigned)trace.count,.seq=seq,.us=now};
@@ -88,6 +88,13 @@ void probe_trace_stop(void) {
     if(was)ESP_LOGI(TAG,"trace stopped with %u samples",(unsigned)n);
 }
 void probe_trace_weight(bool valid,int32_t cg) {xSemaphoreTake(lock,portMAX_DELAY);weight_cg=valid?cg:CW_TRACE_NO_WEIGHT;xSemaphoreGive(lock);}
+void probe_trace_aux(bool valid,int32_t cg) {xSemaphoreTake(lock,portMAX_DELAY);aux_cg=valid?cg:CW_TRACE_NO_WEIGHT;xSemaphoreGive(lock);}
+void probe_trace_brew_dual(int64_t us,const int32_t zero[2],unsigned total) {
+    xSemaphoreTake(lock,portMAX_DELAY);cw_trace_brew_dual(&trace,us,zero,total);uint32_t ms=trace.brew_ms;xSemaphoreGive(lock);
+    ESP_LOGI(TAG,"two-scale brew start at %lu ms, total scale %u",(unsigned long)ms,total);
+}
+void probe_trace_roles(unsigned total) {xSemaphoreTake(lock,portMAX_DELAY);cw_trace_roles(&trace,total);xSemaphoreGive(lock);ESP_LOGI(TAG,"total scale now %u",total);}
+void probe_trace_resume(void) {xSemaphoreTake(lock,portMAX_DELAY);cw_trace_resume(&trace);xSemaphoreGive(lock);ESP_LOGI(TAG,"trace resumed");}
 cw_trace_snapshot_t *probe_trace_snapshot(void) {
     cw_trace_snapshot_t *s=NULL;
     xSemaphoreTake(lock,portMAX_DELAY);
@@ -95,13 +102,21 @@ cw_trace_snapshot_t *probe_trace_snapshot(void) {
         size_t bytes=sizeof *s+trace.count*sizeof(cw_trace_sample_t);
         s=heap_caps_malloc(bytes,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
         if(s) {
-            s->count=trace.count;s->brew_ms=trace.brew_ms;s->truncated=trace.truncated;s->samples=(cw_trace_sample_t*)(s+1);
-            memcpy(s->samples,trace.samples,trace.count*sizeof(cw_trace_sample_t));
-            for(size_t i=0;i<s->count;i++)if(s->samples[i].weight_cg!=CW_TRACE_NO_WEIGHT)s->samples[i].weight_cg-=trace.zero_cg;
+            s->count=trace.count;s->brew_ms=trace.brew_ms;s->truncated=trace.truncated;s->dual=trace.dual;s->samples=(cw_trace_sample_t*)(s+1);
+            // The snapshot holds added water and, with two scales, the beverage.
+            for(size_t i=0;i<s->count;i++) {
+                s->samples[i]=trace.samples[i];
+                s->samples[i].weight_cg=cw_trace_water(&trace,&trace.samples[i]);s->samples[i].aux_cg=cw_trace_out(&trace,&trace.samples[i]);
+            }
         }
     }
     xSemaphoreGive(lock);
     return s;
+}
+size_t probe_trace_out_chart(size_t columns,int32_t *out_cg) {
+    xSemaphoreTake(lock,portMAX_DELAY);
+    size_t n=cw_trace_out_series(&trace,cw_trace_span_ms(cw_trace_elapsed_ms(&trace)),columns,out_cg);
+    xSemaphoreGive(lock);return n;
 }
 void probe_trace_reading(probe_reading_t *out) {xSemaphoreTake(lock,portMAX_DELAY);*out=latest;xSemaphoreGive(lock);}
 size_t probe_trace_chart(size_t columns,int16_t *probe_cc,int32_t *weight_cg,uint32_t *elapsed_ms,uint32_t *span_ms) {

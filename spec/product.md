@@ -10,7 +10,9 @@ brewing assembly sits on the scale while pouring.
 0. Home: the scale link (or, for [roast color](colorimeter.md), the color sensor)
    arriving first opens its product. Holding both keys 900 ms returns Home from any
    page; a scale still connected is then a Brew tile rather than an automatic entry.
-1. Connect the scale and select a brewer. RS is not needed yet.
+1. Connect the scale and select a brewer. RS is not needed yet. With a second scale
+   (Lefu CK811) connected before the pour, the brew uses
+   [two scales](two-scales.md): no empty server, no lift, automatic end.
 2. Place an empty server. Capture weight >10g stable within 0.2g for 5 seconds.
    Optional Reset dispatches tare; ATT success never claims tare completion.
 3. Prepare the brewing assembly. Dose is saved on the scale during bean weighing,

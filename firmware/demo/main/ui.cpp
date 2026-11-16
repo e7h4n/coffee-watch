@@ -18,6 +18,7 @@ static int32_t previous_value=0;
 static bool have_value=false;
 static const char *names[]={"V60","Switch","AeroPress","Hoop"};
 static LGFX_Sprite *c;
+static const UiState *cu;
 static void text(const char *s,int x,int y,int px,uint32_t color=FG,int max_width=0,bool ink_center=false,lgfx::textdatum_t datum=middle_center) {
     struct FontSlot {lgfx::PointerWrapper data;lgfx::VLWfont font;bool loaded=false;};
     static FontSlot slots[sizeof(font_sizes)/sizeof(font_sizes[0])];
@@ -173,6 +174,9 @@ static uint32_t trace_chart(int X0,int X1,int Y0,int Y1,bool live) {
     }
     int32_t scale_cg=30000;
     for(size_t i=0;i<n;i++)if(weight[i]!=CW_TRACE_NO_WEIGHT&&weight[i]/100*115>scale_cg)scale_cg=weight[i]/100*115;
+    // Two scales: the beverage band sits in front of the water steps on the same axis.
+    static int32_t out[MAX_COLUMNS];
+    size_t n_out=cu&&cu->dual.active?std::min(n,probe_trace_out_chart(columns,out)):0;
     int last_top=-1,last_x=X0;int32_t last_weight=0;
     for(size_t i=0;i<n;i++) {
         if(weight[i]==CW_TRACE_NO_WEIGHT)continue;
@@ -181,7 +185,26 @@ static uint32_t trace_chart(int X0,int X1,int Y0,int Y1,bool live) {
         if(last_top>=0)c->drawLine(x-1,last_top,x,top,design::water_edge);
         last_top=top;last_x=x;last_weight=w;
     }
-    if(labels&&last_weight>=100&&last_x-X0>70) {snprintf(b,sizeof b,"%ld ml",(long)((last_weight+50)/100));text(b,last_x-8,Y1-14,18,MUTED,0,false,middle_right);}
+    int out_top=-1,out_x=X0;int32_t out_last=0;
+    for(size_t i=0;i<n_out;i++) {
+        if(out[i]==CW_TRACE_NO_WEIGHT)continue;
+        int32_t w=std::max<int32_t>(0,out[i]);int h=(int)((Y1-Y0)*.92f*w/scale_cg),x=X0+(int)i,top=Y1-h;
+        if(h>0)c->drawFastVLine(x,top,h,design::out_area);
+        if(out_top>=0)c->drawLine(x-1,out_top,x,top,design::out_edge);
+        out_top=top;out_x=x;out_last=w;
+    }
+    if(labels&&last_weight>=100&&last_x-X0>70) {
+        snprintf(b,sizeof b,"%ld ml",(long)((last_weight+50)/100));
+        int water_y=Y1-(int)((Y1-Y0)*.92f*last_weight/scale_cg);
+        text(b,last_x-8,n_out?water_y+14:Y1-14,18,MUTED,0,false,middle_right);
+        if(n_out&&out_last>=100) {snprintf(b,sizeof b,"%ld g",(long)((out_last+50)/100));text(b,out_x-8,Y1-14,18,design::out_edge,0,false,middle_right);}
+    }
+    // Switch/AeroPress: where the cup scale first saw the drain (valve open, press).
+    if(cu&&cu->dual.active&&cu->dual.open_valid&&span) {
+        int x=X0+(int)std::lround((float)(X1-X0)*cu->dual.open_ms/span);
+        for(int y=Y0;y<Y1;y+=6)c->drawFastVLine(x,y,3,design::out_edge);
+        if(labels)text("Open",x,Y0-12,16,design::out_edge);
+    }
     int px=0,py=0;bool have=false;float previous=0;
     auto visit=[&](size_t i) {
         if(probe[i]==CW_TRACE_NO_PROBE) {have=false;return;}
@@ -224,8 +247,12 @@ static void battery(const UiState &u) {
     else text("--%",254,31,20,battery_color);
     enter=page_enter;
 }
+// Compact 34px metric for three columns: value then a small unit.
+static void small_metric(const char *value,const char *unit,int x,int y,uint32_t color=FG) {
+    text(value,x+10,y,34,color,0,false,middle_right);text(unit,x+15,y+5,18,MUTED,0,false,middle_left);
+}
 void ui_draw(const cw_flow_t &s,const UiState &u) {
-    c=&board_canvas();c->fillScreen(BG);
+    c=&board_canvas();c->fillScreen(BG);cu=&u;
     battery(u);
     if(!u.wifi_setup&&u.record_visible&&(s.stage==CW_TDS||s.stage==CW_REPORT)) {
         const char *label=u.record.state==CW_RECORD_SAVING?"Dropbox: saving":u.record.state==CW_RECORD_SAVED?"Dropbox: saved":"Dropbox: save failed";
@@ -255,7 +282,7 @@ void ui_draw(const cw_flow_t &s,const UiState &u) {
         // Home: the first device to connect picks the product; a connected one is also a choice.
         text("Connect scale or color sensor",234,118,design::type::body,MUTED);
         struct Tile {const char *label,*on,*off;bool enabled;int action,top;};
-        const Tile tiles[]={{"Brew","Scale connected","Searching for scale",u.home_scale,UI_HOME_BREW,160},
+        const Tile tiles[]={{"Brew",u.home_scales[0]?u.home_scales:"Scale connected","Searching for scale",u.home_scale,UI_HOME_BREW,160},
                             {"Roast color","Color sensor attached","No color sensor",u.home_color,UI_HOME_COLOR,248}};
         for(const Tile &t:tiles) {
             bool held=t.enabled&&u.held==t.action;
@@ -272,6 +299,8 @@ void ui_draw(const cw_flow_t &s,const UiState &u) {
         text("Hold both to restart",234,303,19,ACCENT);return;
     }
     if(!s.scale_ready&&s.stage!=CW_REPORT&&s.stage!=CW_TDS) {
+        // The second scale alone cannot brew: the stored dose comes from BOOKOO.
+        if(s.aux_ready) {text("Connect BOOKOO",design::center_x,design::center_y,design::type::status,FG,0,true);text("Dose comes from BOOKOO",234,290,18,MUTED);bottom("Wi-Fi setup",true,u.held==1);return;}
         text("Connect scale",design::center_x,design::center_y,design::type::status,FG,0,true);bottom("Wi-Fi setup",true,u.held==1);if(s.error[0])text(s.error,234,290,18,MUTED);return;
     }
     char b[64];
@@ -312,16 +341,34 @@ void ui_draw(const cw_flow_t &s,const UiState &u) {
         text("Dose",150,266,design::type::label,MUTED);text("Bed",318,266,design::type::label,MUTED);
         snprintf(b,sizeof b,"%.1f",s.scale.dose_cg/100.0);unit_value(b,"g",170,300);
         probe_value(336,300);
+        if(u.dual.scales>=2)text("2 scales",234,66,18,MUTED);
         break;
     case CW_BREW: {
         // Water leads, ratio and bed temperature follow, the clock uses the free bottom.
         // Water changes every notification while pouring, so it never value-flashes.
         bool stopped=s.result_valid;
-        int32_t water=stopped?s.result.water_cg:s.live_cg-s.zero_cg;
+        int32_t water=stopped?s.result.water_cg:cw_brew_water(&s);
         if(stopped||s.live_valid)fmt(222,124,design::type::hero,FG,"%.1f",water/100.0);else text("--",234,124,design::type::hero,MUTED);
         text("ml",344,142,design::type::body,MUTED,0,false,middle_left);
+        bool ratio=s.brew_dose_valid&&s.brew_dose_cg>0;
+        if(!stopped&&u.dual.active) {
+            // Two scales: Ratio, bed temperature and the cup scale's drip (out) flow.
+            text("2 scales",234,66,18,MUTED);
+            text("Ratio",120,194,design::type::label,MUTED);text("Bed",234,194,design::type::label,MUTED);text("Out",348,194,design::type::label,MUTED);
+            if(ratio)fmt(120,228,34,ACCENT,"1:%.1f",(double)water/s.brew_dose_cg);else text("1:--",120,228,34,MUTED);
+            probe_reading_t now;probe_trace_reading(&now);
+            if(now.valid) {
+                snprintf(b,sizeof b,"%.1f",(double)now.celsius);text(b,242,228,34,FG,0,false,middle_right);
+                c->fillSmoothCircle(249,219,3,MUTED);c->fillSmoothCircle(249,219,1,BG);text("C",254,233,18,MUTED,0,false,middle_left);
+            } else text("--",234,228,34,MUTED);
+            if(u.dual.out_valid) {snprintf(b,sizeof b,"%.1f",(double)u.dual.out_gps);small_metric(b,"g/s",340,228,design::out_edge);}
+            else text("--",348,228,34,MUTED);
+            uint32_t elapsed=trace_chart(88,380,264,334,true);
+            time_text(elapsed,234,396,design::type::time);
+            break;
+        }
         text("Ratio",150,194,design::type::label,MUTED);text(stopped?"Dose":"Bed",318,194,design::type::label,MUTED);
-        if(s.brew_dose_valid&&s.brew_dose_cg>0)fmt(150,228,40,ACCENT,"1:%.1f",(double)water/s.brew_dose_cg);
+        if(ratio)fmt(150,228,40,ACCENT,"1:%.1f",(double)water/s.brew_dose_cg);
         else text("1:--",150,228,40,MUTED);
         if(stopped) {
             snprintf(b,sizeof b,"%.1f",s.result.dose_cg/100.0);unit_value(b,"g",338,228);

@@ -197,7 +197,7 @@ static const char *upload_trace(cw_brew_record_t *r,const cw_trace_snapshot_t *t
     size_t bound=cw_trace_csv_bound(trace->count);
     char *csv=heap_caps_malloc(bound,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
     if(!csv)return "trace_out_of_memory";
-    int n=cw_trace_csv(trace->samples,trace->count,trace->brew_ms,csv,bound);
+    int n=cw_trace_csv(trace->samples,trace->count,trace->brew_ms,trace->dual,csv,bound);
     char rev[64];
     upload_result_t result=n<0?UPLOAD_FAILED:upload(path,"\"add\"",csv,(size_t)n,rev,sizeof rev);
     free(csv);
