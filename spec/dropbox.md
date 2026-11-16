@@ -80,6 +80,30 @@ reboot the UI reports **Authorization saved on watch**, not a live connection.
 intact. Revoke access by disconnecting the app under Connected apps in Dropbox
 settings. Wi-Fi and brew state are separate.
 
+## Brew recovery and serial diagnostics
+
+Brew uploads reconcile the exact path with `files/get_metadata` before writing.
+An existing file is accepted only when its content hash matches the intended
+bytes, or updated with the exact known hash/revision. A failed/ambiguous upload
+gets readback verification rather than blind write replay. If metadata scope is
+missing, `metadata_scope_required` stops writes; the firmware does not change
+scope or authorization silently. See [Brew records](brew-record.md) for retained
+trace and local summary-backup limits.
+
+- `dropbox status`: public authorization/check state (not proof of the last brew).
+- `dropbox check`: small `connection-check.json` upload/hash verification.
+- `dropbox test`: asynchronous synthetic 2,000-sample dual-scale CSV, draft JSON,
+  then complete JSON. Files use `/connection-check-*` names and explicit
+  diagnostic labels, never actual brew filenames. Restores live recovery state.
+- `record status`: current brew's revision/path/error.
+- `record backups`: newest eight summary-only NVS backups; no automatic upload.
+
+The result screen displays the actual brew error code. Serial logs never expose
+credentials, token bodies or Authorization headers. Full diagnostic success
+covers serialization, CSV upload, JSON create/update and remote verification,
+not a real sensor/brew acceptance test. BLE command operation numbers remain
+unchanged; the full diagnostic operation is serial-only.
+
 ## BLE interface
 
 The setup service is `c9a81001-9a9d-4f55-a621-5b4e7699b647`.

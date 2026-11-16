@@ -255,8 +255,9 @@ void ui_draw(const cw_flow_t &s,const UiState &u) {
     c=&board_canvas();c->fillScreen(BG);cu=&u;
     battery(u);
     if(!u.wifi_setup&&u.record_visible&&(s.stage==CW_TDS||s.stage==CW_REPORT)) {
-        const char *label=u.record.state==CW_RECORD_SAVING?"Dropbox: saving":u.record.state==CW_RECORD_SAVED?"Dropbox: saved":"Dropbox: save failed";
-        text(label,234,438,16,u.record.state==CW_RECORD_SAVED?ACCENT:MUTED);
+        char failed[56];snprintf(failed,sizeof failed,"Dropbox: %s",u.record.error[0]?u.record.error:"save failed");
+        const char *label=u.record.state==CW_RECORD_SAVING?"Dropbox: saving":u.record.state==CW_RECORD_SAVED?"Dropbox: saved":failed;
+        text(label,234,438,u.record.state==CW_RECORD_FAILED?12:16,u.record.state==CW_RECORD_SAVED?ACCENT:MUTED);
     }
     if(u.wifi_setup) {
         text("Wi-Fi setup",234,116,40);

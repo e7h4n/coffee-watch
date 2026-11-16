@@ -33,20 +33,22 @@ static cw_flow_t flow;
 static cw_record_tracker_t records;
 static struct {cw_record_status_t record;bool record_visible;int held,result_page;int64_t page_us;} ui;
 static bool rs_requested,trace_stopped;
-static unsigned uploads,rs_requests,revision;
+static unsigned uploads,rs_requests,revision,backups;
 static int trace;
 static void trace_follow(int64_t) {trace_stopped=flow.stage!=CW_BREW;}
 static cw_trace_snapshot_t *probe_trace_snapshot() {assert(trace_stopped);return reinterpret_cast<cw_trace_snapshot_t *>(&trace);}
 static void transport_find_rs() {rs_requests++;}
+static void backup_record(const cw_brew_record_t &r) {assert(r.revision==uploads+1);backups++;}
 extern "C" bool dropbox_setup_record(const cw_brew_record_t *r,cw_trace_snapshot_t *snapshot) {
     uploads++;
-    if(r->revision==1)assert(snapshot==reinterpret_cast<cw_trace_snapshot_t *>(&trace));
+    assert(backups==uploads);
+    if(!r->complete)assert(snapshot==reinterpret_cast<cw_trace_snapshot_t *>(&trace));
     else assert(snapshot==nullptr);
     return true;
 }
 extern "C" bool cw_record_event(cw_record_tracker_t *,cw_stage_t before,const cw_flow_t *f,int64_t,cw_brew_record_t *out) {
     if((before==CW_BREW&&f->stage==CW_TDS)||(before==CW_TDS&&f->stage==CW_REPORT)) {
-        *out={};out->revision=++revision;snprintf(out->id,sizeof out->id,"test");return true;
+        *out={};out->revision=++revision;out->complete=f->stage==CW_REPORT;snprintf(out->id,sizeof out->id,"test");return true;
     }
     return false;
 }
@@ -59,7 +61,9 @@ int main() {
     assert(uploads==1&&revision==1&&rs_requests==1&&ui.record_visible&&ui.record.state==CW_RECORD_SAVING);
     flow_follow(CW_TDS,300,true);assert(uploads==1&&rs_requests==1);
     flow.stage=CW_REPORT;flow_follow(CW_TDS,400,true);
-    assert(uploads==2&&revision==2&&rs_requests==1);
+    assert(uploads==2&&revision==2&&rs_requests==1&&backups==2);
+    flow.stage=CW_TDS;flow_follow(CW_BREW,500,true);
+    assert(uploads==3&&revision==3&&backups==3);
 }
 '''
         with tempfile.TemporaryDirectory(prefix='cw-follow-') as temp:
