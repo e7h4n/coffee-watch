@@ -4,7 +4,8 @@
 #include <string.h>
 static bool decode(uint8_t op,const uint8_t *ssid,unsigned sn,const uint8_t *password,unsigned pn) {
     uint8_t b[104]={1,op,sn,pn,0x78,0x56,0x34,0x12};cw_wifi_packet_t out={0};
-    if(sn<=32)memcpy(b+8,ssid,sn);if(pn<=64&&sn+pn<=96)memcpy(b+8+sn,password,pn);
+    if(sn<=32)memcpy(b+8,ssid,sn);
+    if(pn<=64&&sn+pn<=96)memcpy(b+8+sn,password,pn);
     bool result=cw_wifi_packet_decode(b,8+sn+pn,&out);
     if(result)assert(out.op==op&&out.request_id==0x12345678);
     return result;

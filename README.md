@@ -13,7 +13,8 @@ color tile, and Wi-Fi setup. Whichever connects first picks the product: the sca
 opens the brew assistant, the RoastWatch color sensor opens roast color mode. Hold
 both keys for 0.9 s on any page to return Home; a device that is still connected is
 then offered as a lit tile instead of reopening by itself. Wi-Fi and Dropbox are
-shared by both.
+shared by both. The **Firmware** chip at the top of Home opens explicit update
+checks; updates never run automatically.
 
 ## From brewing to a report
 
@@ -64,7 +65,7 @@ Extraction yield (%) = TDS (%) / (100 − TDS (%)) × added water (g) / dry coff
 
 On any screen, the StopWatch powers off after 10 minutes without interaction or
 state changes. Continuous weight updates and screen refreshes do not restart
-this interval.
+this interval. Shutdown is suspended while an update check/download is busy.
 
 ## Supported hardware
 
@@ -101,19 +102,48 @@ Bluetooth, enter the pairing code shown on the watch if requested, and submit
 your 2.4 GHz network details. Credentials go directly to the watch; the static
 page does not upload or save them. See the [Wi-Fi interface guide](spec/wifi.md).
 
+## Firmware updates
+
+The 16 MiB watch now targets two 4 MiB application slots, with **7.93 MiB reserved
+for future local data**. No SD card or image-sized RAM buffer is needed. From
+Home, tap **Firmware**, check the GitHub Release, download into the inactive slot,
+then explicitly choose **Restart & install**. Downloads and installation require
+at least 30% battery; falling below 20% or an unknown reading cancels a download.
+The update modal blocks brewing/color entry and serializes Dropbox admission;
+active/queued uploads and retained unsaved records prevent admission. Back and
+Home wait for cancellation to finish before releasing that protection.
+
+New OTA boots are confirmed only after a rendered UI, successful NVS startup and
+ten seconds of watchdog-monitored main-loop health; otherwise the bootloader can
+roll back on reset. Wi-Fi, scales and optional color hardware are not health gates.
+Updates use verified HTTPS plus strict image identity, size and SHA-256 checks,
+**not a publisher signature**. No Secure Boot or eFuse changes are made.
+
+**The first upgrade from the existing factory layout needs a separately approved
+USB migration**, with private full-flash/NVS/PHY backups and readback checks.
+It is not an atomic OTA and cannot automatically roll back the old layout. Finish
+and save every brew first: USB resets lose any volatile trace. Do not run a generic
+`idf.py flash` or rewrite a fixed application address on an existing watch. Read
+[the update and recovery procedure](spec/firmware-update.md). The reserved data
+area is not yet a durable curve store or upload queue. Hardware migration, OTA and
+power-loss acceptance remain separate from native tests and successful builds.
+
 ## Build and use
 
-With ESP-IDF 5.5.x activated, run from `firmware/demo`:
+With **ESP-IDF 5.5.2** activated, run from `firmware/demo`:
 
 ```sh
 python3 fetch_drivers.py
-IDF_COMPONENT_MANAGER=0 idf.py build
-idf.py -p /dev/cu.YOUR_STOPWATCH_PORT flash
+idf.py -DPROJECT_VER=dev build
 ```
 
-The driver helper downloads M5Stack drivers pinned to specific commits. See the
-[firmware guide](firmware/demo/README.md) for device preparation, controls,
-building, and flashing.
+This builds only; use the guarded USB procedure above for first migration and
+Home → Firmware afterwards. The driver helper downloads M5Stack drivers pinned
+to specific commits. The firmware CI tests and builds PR candidates, and publishes
+versioned application/manifest/checksums plus a separate USB-only ZIP on `main`.
+An existing generated `sdkconfig` overrides defaults: use a fresh configuration
+or deliberately migrate every required setting before packaging. See the
+[firmware guide](firmware/demo/README.md) for controls and device preparation.
 
 ## Development documentation
 
@@ -122,6 +152,7 @@ building, and flashing.
 - [Roast color mode](spec/colorimeter.md)
 - [Two-scale brewing](spec/two-scales.md)
 - [Wi-Fi setup and provisioning](spec/wifi.md)
+- [Firmware OTA, initial USB migration and recovery](spec/firmware-update.md)
 - [Bluetooth interfaces](spec/bluetooth.md)
 - [Acceptance checklist](spec/acceptance.md)
 - [Brewer artwork](spec/icons/)
@@ -134,12 +165,12 @@ Run protocol and state-machine tests from the repository root:
 python3 -m unittest discover -s tools -v
 ```
 
-Tests require a C compiler. The native AES harness uses macOS CommonCrypto;
-device firmware uses ESP-IDF mbedTLS. The Dropbox fault-injection test also uses
-cJSON and portable mbedTLS sources from an ESP-IDF checkout: set `IDF_PATH` to run
-it (it reports an explicit skip if unavailable). Release verification should run
-that test without skipping. Build outputs, downloaded drivers, and local
-captures are excluded from version control.
+Tests require C/C++ compilers, `esptool==4.11.0` for the migration no-retry
+regression, and an ESP-IDF source checkout selected by `IDF_PATH` with cJSON and
+portable mbedTLS sources. AES uses CommonCrypto on macOS and real mbedTLS on Linux.
+Missing optional crypto/Dropbox sources explicitly skip coverage; release CI
+supplies them and requires zero skips. Build outputs, downloaded drivers, private
+migration backups and local captures are excluded from version control.
 
 ## Dropbox setup
 

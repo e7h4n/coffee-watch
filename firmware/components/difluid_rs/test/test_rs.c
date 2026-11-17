@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: MIT
 #include "difluid_rs.h"
+#ifdef __APPLE__
 #include <CommonCrypto/CommonCryptor.h>
+#else
+#include <mbedtls/aes.h>
+#endif
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
@@ -10,9 +14,22 @@ static const uint8_t key[]={0x7a,0x3f,0xe9,0x1c,0x8b,0x5d,0x2a,0x6e,0x4c,0x91,0x
 static const uint8_t iv[]={0x9e,0x2b,0x7c,0x45,0x1f,0x8a,0x3d,0x6b,0xe4,0x57,0x92,0x0c,0x8f,0x3a,0x6d,0xb1};
 static unsigned results,errors,rejections;
 static rs_event_t last;
-static bool decrypt(void *ctx,const uint8_t *in,uint8_t *out,size_t n) {
+// Independent platform crypto verifies the production streaming decoder against
+// real captured ciphertext on both macOS and the Linux release CI runner.
+static bool aes(bool encrypt,const uint8_t *in,uint8_t *out,size_t n) {
+#ifdef __APPLE__
     size_t written=0;
-    return CCCrypt(kCCDecrypt,kCCAlgorithmAES,0,key,16,iv,in,n,out,n,&written)==kCCSuccess && written==n;
+    return CCCrypt(encrypt?kCCEncrypt:kCCDecrypt,kCCAlgorithmAES,0,key,16,iv,in,n,out,n,&written)==kCCSuccess && written==n;
+#else
+    mbedtls_aes_context cipher;mbedtls_aes_init(&cipher);
+    uint8_t initial[16];memcpy(initial,iv,sizeof initial);
+    int rc=encrypt?mbedtls_aes_setkey_enc(&cipher,key,128):mbedtls_aes_setkey_dec(&cipher,key,128);
+    if(!rc)rc=mbedtls_aes_crypt_cbc(&cipher,encrypt?MBEDTLS_AES_ENCRYPT:MBEDTLS_AES_DECRYPT,n,initial,in,out);
+    mbedtls_aes_free(&cipher);return rc==0;
+#endif
+}
+static bool decrypt(void *ctx,const uint8_t *in,uint8_t *out,size_t n) {
+    return aes(false,in,out,n);
 }
 static void emit(void *ctx,const rs_event_t *e) {
     if(e->kind==RS_MEASUREMENT) {results++;last=*e;}
@@ -27,9 +44,9 @@ static uint16_t crc(const uint8_t *p,size_t n) {
 }
 static size_t packet(uint8_t *plain,uint8_t *wire,bool valid_crc) {
     if(valid_crc) {uint16_t c=crc(plain,45);plain[45]=c;plain[46]=c>>8;}
-    uint8_t body[50];size_t written=0;
-    assert(CCCrypt(kCCEncrypt,kCCAlgorithmAES,0,key,16,iv,plain,48,body,48,&written)==kCCSuccess);
-    assert(written==48);body[48]=0xf1;body[49]=0;
+    uint8_t body[50];
+    assert(aes(true,plain,body,48));
+    body[48]=0xf1;body[49]=0;
     for(unsigned i=0;i<49;i++)body[49]+=body[i];
     size_t n=0;wire[n++]=0xda;wire[n++]=0xda;
     for(unsigned i=0;i<50;i++) {
