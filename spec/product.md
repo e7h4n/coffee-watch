@@ -124,9 +124,45 @@ tare-completed assertion. Only subsequent actual weight notifications can comple
 the independent 5-second empty-server capture rule. Mode query or write failure
 cannot advance capture.
 
-The watch never arms the scale's Auto submode. An Auto event (03 0D) during
-preparation, Ready, brewing or beverage weighing means the scale re-tared itself,
-which would move the zero under the brew, so it is an explicit interruption.
+The watch never sends Auto Ready/Start. Watch-owned single-probe and dual-scale
+brews still reject Auto events (03 0D), which would move their tare reference.
+
+### Explicit BOOKOO fallback for a single scale without a readable probe
+
+After empty-server capture and a valid stored dose, watch Ready offers **Press
+Start on BOOKOO** when the initialized mode is Ratio + Auto and probe observations
+are invalid, with no valid observation in the last two seconds. The prompt and
+admission share one predicate. Invalid ADC is not proof of disconnection (a cold
+probe can saturate); the physical Ready event is the user's explicit selection.
+Missing temperature or rising weight alone never selects fallback. No manual
+Ready/Start command is sent by the watch. Manual Ratio without Auto instead shows
+**Use Ratio + Auto**. Initialization still performs the same guarded exits/tare.
+
+Only an in-order BOOKOO Ready (state 2), Start (1), Stop (0) sequence advances the
+fallback. Start snapshots the stored dose and sets the trace's post-Auto tare zero
+to 0. Live timer follows BOOKOO weight-packet elapsed time; Stop freezes native
+elapsed time, positive settled water and the Start dose. Local weight falls or
+quiet flow never end this branch. Later probe samples cannot switch ownership;
+late second-scale attachment in Auto Ready requires a restart, not a new zero.
+
+Auto Done (BOOKOO Ultra 4.0.1) streams zero while the server is present and negative
+gross mass when it is removed. Prompt **Lift server off scale**; beverage is
+`-live_weight - empty_server`, positive and stable within 0.2g for one second.
+TDS and extraction then use the common frozen result. The UI and settlement share
+the same beverage arithmetic. Do not use the watch-owned server-on-scale formula.
+
+Physical Exit Ready, Back discarding a native Ready/running/reviewed brew, or
+leaving/re-entering Auto Done before beverage settlement interrupts with a visible
+restart instruction. A full brewer initialization and empty-server recapture is
+required before reusing watch-owned logic. A frozen result can still be reviewed
+and continued without changing its references. After Done has been exited, Back
+from TDS returns to the carousel instead of attempting a stale-reference reweigh.
+Scale disconnection before settlement interrupts; after confirmed beverage/TDS the
+scale can turn off. No automatic retry, scale timer override or inferred dose.
+
+This restores the historical Auto contract, but native replay is not real-device
+acceptance of the changed firmware. Start/Stop versus raw-weight BLE ordering and
+curve endpoint timing still require hardware verification.
 
 ## Wi-Fi settings
 

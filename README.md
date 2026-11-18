@@ -72,7 +72,7 @@ this interval. Shutdown is suspended while an update check/download is busy.
 | Device | Role | Validated version |
 | --- | --- | --- |
 | M5Stack StopWatch | Interaction, device connections, and reports | ESP32-S3 |
-| BOOKOO Themis Ultra | Coffee dose and weight | Firmware 4.0.1, Ratio mode (Auto not used) |
+| BOOKOO Themis Ultra | Coffee dose and weight | Firmware 4.0.1, Ratio mode; Ratio + Auto for single-scale/no-probe fallback |
 | DiFluid RS | TDS measurement | Firmware v002-005 |
 | Lefu CK811 | Second scale for two-scale brewing (total or cup) | 5 kg / 0.1 g; protocol from the open-source Pourista driver, not yet validated here |
 | Bed probe | Brew start and temperature trace | 100 kΩ B3950 NTC on G8, G9 = 3V3/2 reference |
@@ -82,6 +82,24 @@ This is a prototype with real brewing walkthroughs completed. The firmware
 connects to the two peers configured in its transport; a general device picker
 is not yet available. The workflow depends on the events provided by these
 devices and firmware versions. Other models and versions have not been validated.
+
+### Single scale without a readable bed probe
+
+First capture the empty server and save the dose as above. Put BOOKOO in
+**Ratio + Auto**, assemble the brewer, then press **Start on BOOKOO** to enter
+its Ready state. The scale detects water and starts the timer; lifting the dripper
+ends it. The watch follows BOOKOO's Start/Stop, elapsed time and settled water.
+Auto Done re-zeroes the scale: **lift the server off the scale** to capture beverage
+mass (negative gross minus the saved empty-server mass), then measure TDS.
+
+This fallback is selected only by the physical Auto Ready event, with one scale,
+valid empty-server/dose references, and no valid probe reading for at least two
+seconds. Invalid ADC readings can also mean a cold/saturated probe, not confirmed
+physical disconnection. Probe arrival during this brew never switches ownership.
+Leaving Auto Ready, discarding a reviewed brew, or leaving Auto Done before
+weighing the server requires a new brew initialization; stale tare references are
+not reused. Two-scale and probe-started brews retain their existing behavior.
+Native tests cover this fallback; new-firmware hardware acceptance is still pending.
 
 ## Roast color mode
 
