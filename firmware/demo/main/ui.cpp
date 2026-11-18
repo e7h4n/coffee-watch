@@ -92,7 +92,7 @@ bool ui_tick(const cw_flow_t &s,const UiState &u,int64_t now) {
     if(page!=previous_page) {previous_page=page;entered_us=now;have_value=false;}
     enter=std::clamp((now-entered_us)/(float)design::motion::enter_us,0.f,1.f);
     enter=1-std::pow(1-enter,3);
-    int32_t value=s.stage==CW_BEVERAGE?s.live_cg-s.empty_cg:s.live_cg;
+    int32_t value=s.stage==CW_BEVERAGE?cw_beverage_weight(&s):s.live_cg;
     if(!have_value||value!=previous_value) {previous_value=value;changed_us=now;have_value=true;}
     bool numeric=s.stage==CW_EMPTY||s.stage==CW_PREP||s.stage==CW_BEVERAGE;
     value_flash=numeric?1-std::clamp((now-changed_us)/(float)design::motion::value_us,0.f,1.f):0;
@@ -354,9 +354,9 @@ void ui_draw(const cw_flow_t &s,const UiState &u) {
         bottom(names[s.brewer],!u.carousel_dir,u.held==1);break;
     case CW_EMPTY:case CW_BEVERAGE: {
         bool empty=s.stage==CW_EMPTY;
-        int32_t weight=empty?s.live_cg:s.live_cg-s.empty_cg;
+        int32_t weight=empty?s.live_cg:cw_beverage_weight(&s);
         const char *caption=empty?(s.initial_step?"Preparing scale":(s.stable.active?"Empty server":"Place empty server")):
-            (s.stable.active?"Beverage weight":"Keep server on scale");
+            (s.stable.active?"Beverage weight":s.bookoo_auto?"Lift server off scale":"Keep server on scale");
         if(s.stable.active)stability_bar(s.stable.progress);
         text(caption,234,146,design::type::body,MUTED);
         if(s.live_valid&&(empty||weight>0))fmt(225,236,design::type::hero,number_color(),"%.1f",weight/100.0);
@@ -372,7 +372,9 @@ void ui_draw(const cw_flow_t &s,const UiState &u) {
         text("Save dose on scale",234,146,design::type::body,MUTED);break;
     case CW_READY:
         // Armed by itself: no Start action. Dose and probe confirm the brew can start.
-        text("Pour to start",234,124,design::type::body,MUTED);
+        text(cw_bookoo_auto_available(&s)?"Press Start on BOOKOO":
+            !s.dual&&!s.bookoo_auto&&s.probe_observed&&!s.probe_valid&&!s.scale_auto_mode?"Use Ratio + Auto":"Pour to start",
+            234,124,design::type::body,MUTED);
         text("Ready",234,190,design::type::ready,mix(FG,ACCENT,150+(unsigned)(breath*105)));
         text("Dose",150,266,design::type::label,MUTED);text("Bed",318,266,design::type::label,MUTED);
         snprintf(b,sizeof b,"%.1f",s.scale.dose_cg/100.0);unit_value(b,"g",170,300);
@@ -413,7 +415,7 @@ void ui_draw(const cw_flow_t &s,const UiState &u) {
         } else {
             probe_value(336,228);
             uint32_t elapsed=trace_chart(88,380,264,334,true);
-            time_text(elapsed,234,396,design::type::time);
+            time_text(s.bookoo_auto?s.scale.elapsed_ms:elapsed,234,396,design::type::time);
         }
         break;
     }

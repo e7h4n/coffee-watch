@@ -140,8 +140,19 @@ summarized by the acceptance checklist; implementation alone is not proof of
 every physical acceptance check passing.
 
 
-The watch owns the brew: it never sends Auto Ready or a timer command, and an
-Auto event during a brew interrupts it, because Auto re-tares the scale on its own.
+The watch never sends Auto Ready or a timer command. Probe-started and dual-scale
+brews reject Auto events because Auto re-tares the scale on its own.
+
+For **one scale without readable probe**, use **Ratio + Auto**. After empty-server
+capture and stored dose, press Start on BOOKOO to enter native Ready. The watch
+follows native water-detected Start, elapsed time and dripper-lift Stop. Auto Done
+re-zeroes: **lift the server off the scale** for beverage capture, then measure TDS.
+This explicit fallback requires invalid probe observations and no valid sample
+for two seconds; a cold/saturated probe is indistinguishable from an absent one.
+Later probe recovery never changes the active brew's owner. Exit Ready or early
+Exit Done requires a full restart and empty-server recapture, not a reused zero.
+See [the fallback state contract](../../spec/product.md#explicit-bookoo-fallback-for-a-single-scale-without-a-readable-probe).
+The current firmware's real-device Auto fallback acceptance remains pending.
 Ready is a distinct read-only page; timing begins only at the detected pour onset.
 The preparation page has no Reset or manual timer-start action.
 

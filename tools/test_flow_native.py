@@ -17,3 +17,4 @@ class FlowNativeTests(unittest.TestCase):
                             '-lm', '-o', executable], check=True, capture_output=True, text=True, timeout=60)
             result = subprocess.run([executable], check=True, capture_output=True, text=True, timeout=10)
             self.assertIn('26 full-flow scenarios passed', result.stdout)
+            self.assertIn('BOOKOO fallback flow scenarios passed', result.stdout)

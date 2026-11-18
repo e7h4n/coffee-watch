@@ -122,6 +122,102 @@ static int dual_scenarios(void) {
     n++;
     return n;
 }
+static void auto_prepare(cw_flow_t *f) {
+    setup(f);cw_probe_message(f,false,NAN,us+1);
+    weights(f,10000,51);dose(f);assert(f->stage==CW_READY&&!f->dual);
+}
+static void auto_start(cw_flow_t *f) {
+    auto_prepare(f);event(f,2);assert(f->bookoo_auto&&f->scale.phase==BOOKOO_READY);
+    event(f,1);assert(f->stage==CW_BREW&&!f->result_valid);
+}
+static void auto_stop(cw_flow_t *f,int32_t water,uint32_t ms) {
+    bookoo_message_t m={.kind=BOOKOO_AUTO,.state=0,.weight_cg=water,.elapsed_ms=ms};
+    us+=100000;cw_scale_message(f,7,&m,us);
+}
+static void auto_scenarios(void) {
+    cw_flow_t f;
+    // Exact requested lifecycle: physical Ready, water Start, native Stop, lift server, TDS.
+    auto_start(&f);assert(f.zero_cg==0&&f.brew_dose_cg==1500);
+    bookoo_message_t w={.kind=BOOKOO_WEIGHT,.weight_cg=30000,.elapsed_ms=12000};
+    us+=100000;cw_scale_message(&f,7,&w,us);assert(f.scale.elapsed_ms==12000&&cw_brew_water(&f)==30000);
+    dose(&f);cw_probe_message(&f,true,90.f,us+1);assert(f.bookoo_auto&&f.stage==CW_BREW);
+    // A long quiet interval or a weight fall alone cannot stop scale-owned Auto.
+    weights(&f,30000,80);weights(&f,-20000,20);assert(f.stage==CW_BREW);
+    auto_stop(&f,30000,12345);assert(f.stage==CW_BEVERAGE&&f.result_valid);
+    assert(f.result.water_cg==30000&&f.result.elapsed_ms==12345&&f.result.dose_cg==1500);
+    weights(&f,0,20);assert(f.stage==CW_BEVERAGE&&!f.beverage_valid&&cw_brew_water(&f)==30000);
+    // Partial lift / nonpositive beverage never settles; actual gross removal does.
+    weights(&f,-10000,20);assert(f.stage==CW_BEVERAGE);
+    weights(&f,-37000,11);assert(f.stage==CW_TDS&&f.beverage_cg==27000&&cw_beverage_weight(&f)==27000);
+    auto_stop(&f,50000,99999);assert(f.result.water_cg==30000&&f.result.elapsed_ms==12345);
+    cw_scale_link(&f,false,7);assert(!f.interrupted);
+    rs_event_t r={.kind=RS_MEASUREMENT,.tds_percent=1.4f};cw_rs_link(&f,true);cw_rs_message(&f,&r,us+1);
+    assert(f.stage==CW_REPORT&&fabsf(f.extraction-25.2f)<.001f);
+    // Missing readings alone never start, and an out-of-order Start cannot skip Ready.
+    auto_prepare(&f);weights(&f,50000,30);assert(f.stage==CW_READY&&!f.bookoo_auto);
+    event(&f,1);assert(f.interrupted&&!f.result_valid);
+    // Recent valid probe, including a brief invalid reading, keeps existing watch ownership.
+    auto_prepare(&f);cw_probe_message(&f,true,30.f,us);cw_probe_message(&f,false,NAN,us+1);
+    event(&f,2);assert(f.interrupted&&!f.bookoo_auto);
+    // After 2 s without valid probe, explicit physical Ready can choose fallback.
+    auto_prepare(&f);cw_probe_message(&f,true,30.f,us);cw_probe_message(&f,false,NAN,us+1);
+    us+=2100000;cw_probe_message(&f,false,NAN,us);assert(cw_bookoo_auto_available(&f));
+    event(&f,2);assert(f.bookoo_auto&&!f.interrupted);
+    // No dose / no empty server: an early Auto event never creates a brew.
+    setup(&f);cw_probe_message(&f,false,NAN,us+1);weights(&f,10000,51);event(&f,2);
+    assert(f.interrupted&&!f.bookoo_auto&&!f.result_valid);
+    // Manual Ratio mode isn't silently treated as Auto-capable.
+    cw_init(&f);cw_scale_link(&f,true,7);cw_choose(&f,0);initialize_mode(&f,1);
+    cw_probe_message(&f,false,NAN,us+1);weights(&f,10000,51);dose(&f);event(&f,2);
+    assert(f.interrupted&&!f.bookoo_auto);
+    // Dual mode still rejects the scale's self-taring Auto.
+    auto_prepare(&f);cw_aux_link(&f,true,9);assert(f.dual);event(&f,2);assert(f.interrupted&&!f.bookoo_auto);
+    // A late second scale must not silently change zeros after physical Auto Ready.
+    auto_prepare(&f);event(&f,2);cw_aux_link(&f,true,9);assert(f.interrupted&&!f.dual);
+    // Physical Exit Ready cannot return to watch mode with the scale's moved tare.
+    auto_prepare(&f);event(&f,2);event(&f,3);assert(f.bookoo_auto&&f.interrupted&&!f.result_valid);
+    cw_probe_message(&f,true,80.f,us+1);assert(f.stage==CW_READY&&f.interrupted);
+    cw_back(&f);assert(f.stage==CW_BREWER&&!f.bookoo_auto);
+    cw_choose(&f,0);initialize_mode(&f,2);assert(f.stage==CW_EMPTY&&!f.empty_valid);
+    // Frozen-result review permits Continue, but a second Back must not re-arm Auto.
+    auto_start(&f);auto_stop(&f,30000,10000);cw_back(&f);assert(f.stage==CW_BREW&&f.result_valid);
+    cw_revisit_stopped(&f);assert(f.stage==CW_BEVERAGE);
+    cw_back(&f);cw_back(&f);assert(f.interrupted&&f.result_valid&&!cw_bookoo_auto_available(&f));
+    // Back cannot claim to stop the scale; disconnection cannot manufacture results.
+    auto_start(&f);cw_back(&f);assert(f.interrupted&&!f.result_valid);
+    auto_start(&f);cw_scale_link(&f,false,7);assert(f.interrupted&&!f.result_valid);
+    // Stale epochs cannot select or start fallback.
+    auto_prepare(&f);bookoo_message_t stale={.kind=BOOKOO_AUTO,.state=2};cw_scale_message(&f,6,&stale,us+1);
+    assert(!f.bookoo_auto&&f.stage==CW_READY);
+    // Explicitly invalidated dose at Start is rejected; no inference from water.
+    auto_prepare(&f);event(&f,2);bookoo_message_t zero={.kind=BOOKOO_DOSE,.dose_cg=0};cw_scale_message(&f,7,&zero,us+1);
+    event(&f,1);assert(f.interrupted&&!f.result_valid);
+    // Native settlement must be positive; mid-run dose reports don't rewrite the snapshot.
+    auto_start(&f);bookoo_message_t later={.kind=BOOKOO_DOSE,.dose_cg=2000};cw_scale_message(&f,7,&later,us+1);
+    auto_stop(&f,30000,10000);assert(f.result.dose_cg==1500);
+    auto_start(&f);auto_stop(&f,0,1000);assert(f.interrupted);
+    // Exiting Done before server removal invalidates the negative-gross interpretation.
+    auto_start(&f);auto_stop(&f,30000,10000);event(&f,4);weights(&f,-37000,30);
+    assert(f.stage==CW_BEVERAGE&&f.interrupted&&!f.beverage_valid);
+    // New physical Ready while Done needs a restart, never the old negative baseline.
+    auto_start(&f);auto_stop(&f,30000,10000);event(&f,2);assert(f.interrupted&&!f.bookoo_done);
+    // Missing Start/Stop cannot mix a later brew's settlement with the old dose/trace.
+    auto_prepare(&f);event(&f,2);auto_stop(&f,30000,10000);
+    assert(f.interrupted&&!f.result_valid);event(&f,4);assert(!f.result_valid);
+    auto_prepare(&f);event(&f,2);event(&f,4);assert(f.interrupted&&!f.result_valid);
+    auto_start(&f);event(&f,4);assert(f.interrupted&&!f.result_valid);
+    later.dose_cg=2000;cw_scale_message(&f,7,&later,us+1);event(&f,2);event(&f,1);
+    auto_stop(&f,40000,22000);weights(&f,-37000,20);
+    assert(f.interrupted&&!f.result_valid&&!f.beverage_valid&&f.stage!=CW_TDS);
+    auto_start(&f);event(&f,2);assert(f.interrupted&&!f.result_valid);
+    auto_start(&f);event(&f,3);assert(f.interrupted&&!f.result_valid);
+    // Genuine duplicate Ready/Start/Stop notifications are idempotent.
+    auto_prepare(&f);event(&f,2);event(&f,2);event(&f,1);int64_t first_onset=f.onset_us;
+    event(&f,1);assert(!f.interrupted&&f.onset_us==first_onset);
+    auto_stop(&f,30000,12345);auto_stop(&f,30000,12345);
+    assert(!f.interrupted&&f.result.water_cg==30000&&f.result.elapsed_ms==12345);
+    puts("BOOKOO fallback flow scenarios passed");
+}
 int main(void) {
     cw_flow_t f;
     // Full flow: watch-owned start, zero, lift and beverage; no Auto command at all.
@@ -243,5 +339,6 @@ int main(void) {
     brewer=CW_HOOP;brew(&f);cw_back(&f);cw_back(&f);cw_back(&f);cw_back(&f);
     assert(f.stage==CW_BREWER&&f.brewer==CW_HOOP);cw_home(&f);assert(f.brewer==CW_HOOP);
     int dual=dual_scenarios();assert(dual==6);
+    auto_scenarios();
     puts("26 full-flow scenarios passed");
 }
