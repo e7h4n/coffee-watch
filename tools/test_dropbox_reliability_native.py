@@ -5,7 +5,9 @@ available local /tmp/idf/esp-idf development cache, for its actual cJSON and
 portable mbedTLS SHA256 sources. Missing optional sources explicitly skip this
 test; CI/release verification should provide IDF_PATH and require a non-skipped run. Only the HTTP, clock,
 credential refresh and RTOS/UI boundaries are replaced; CSV/JSON serializers,
-upload response validation, metadata reconciliation and recovery run unchanged.
+upload response validation, metadata reconciliation, recovery and the retained
+unsaved predicate run unchanged. The gate harness separately exercises actual
+maintenance admission with a confirmed cached trace and unconfirmed attempts.
 """
 import os
 from pathlib import Path
@@ -51,7 +53,7 @@ class DropboxReliabilityTests(unittest.TestCase):
         enum = re.search(r'typedef enum \{UPLOAD_OK[^\n]+', src).group()
         helpers = ['text_field', 'content_hash', 'upload', 'metadata',
                    'reliable_upload', 'record_status', 'upload_trace',
-                   'upload_record', 'run_diagnostic']
+                   'upload_record', 'run_diagnostic', 'retained_unsaved']
         remote_type = re.search(r'typedef struct \{char hash\[65\][^\n]+', src).group()
         with tempfile.TemporaryDirectory(prefix='cw-dropbox-reliability-') as tmp:
             tmp = Path(tmp)
@@ -75,8 +77,10 @@ class DropboxReliabilityTests(unittest.TestCase):
             # Opt-in sanitizer checks work on native hosts with ASan support.
             if os.environ.get('CW_SANITIZE'):
                 cmd += ['-fsanitize=address,undefined', '-fno-omit-frame-pointer']
-            subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=90)
-            result = subprocess.run([str(tmp / 'test')], check=True, capture_output=True, text=True, timeout=20)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            result = subprocess.run([str(tmp / 'test')], capture_output=True, text=True, timeout=20)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             print(result.stdout, end='')
             self.assertIn('all Dropbox reliability tests passed', result.stdout)
 

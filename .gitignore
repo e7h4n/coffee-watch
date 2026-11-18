@@ -2,6 +2,13 @@
 *.log
 node_modules/
 **/build/
+firmware/demo/build*/
+# Migration backups contain Wi-Fi/Dropbox credentials. Keep them off-repository.
+private-migration-backups/
+**/*.receipt-key
+**/flash-16MiB.bin
+**/nvs-private.bin
+**/phy-private.bin
 **/sdkconfig
 **/sdkconfig.old
 **/__pycache__/

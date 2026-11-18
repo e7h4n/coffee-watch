@@ -42,7 +42,8 @@ static int esp_http_client_set_header(void *h,const char *key,const char *value)
 static int esp_http_client_open(void *h,int n) {assert(h&&n==expected_length);opens++;return open_fail?-1:ESP_OK;}
 static int esp_http_client_write(void *h,const char *body,int n) {
     assert(h&&n>0&&n<=1024);if(expected_body)assert(body==expected_body+accepted_bytes);
-    if(n>max_write)max_write=n;writes++;
+    if(n>max_write)max_write=n;
+    writes++;
     int accepted=partial?(writes==1?3:-1):n;
     if(accepted>0)accepted_bytes+=accepted;
     return accepted;

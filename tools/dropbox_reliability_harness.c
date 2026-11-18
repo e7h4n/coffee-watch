@@ -17,7 +17,7 @@
 #define MALLOC_CAP_8BIT 2
 static char response[RESPONSE_MAX];
 static unsigned active_revision=7,callbacks,write_count,metadata_count,csv_writes,json_writes;
-static bool refresh_ok=true,auth_current=true,allocation_fail;
+static bool refresh_ok=true,auth_current=true,clock_ok=true,allocation_fail;
 static char last_error[64],last_log[256];
 static void log_message(const char *fmt,...) {
     va_list a;va_start(a,fmt);vsnprintf(last_log,sizeof last_log,fmt,a);va_end(a);
@@ -28,7 +28,7 @@ static void *heap_caps_malloc(size_t n,unsigned caps) {(void)caps;return allocat
 void mbedtls_platform_zeroize(void *p,size_t n) {volatile unsigned char *v=p;while(n--)*v++=0;}
 static bool current(void) {return auth_current;}
 static bool load(void) {return true;}
-static bool clock_ready(void) {return true;}
+static bool clock_ready(void) {return clock_ok;}
 static bool refresh(void) {return refresh_ok;}
 static int64_t esp_timer_get_time(void) {return 300000000;}
 void wifi_setup_dropbox_changed(const char *state) {(void)state;}
@@ -58,7 +58,7 @@ static int describe(file_t *f) {
     snprintf(response,sizeof response,"{\"path_lower\":\"%s\",\"content_hash\":\"%s\",\"rev\":\"%s\"}",f->path,f->hash,f->rev);return 200;
 }
 static int http(const char *url,const char *body,size_t length,const char *type,bool authorized,const char *arg) {
-    (void)type;assert(authorized);response[0]=0;
+    (void)type;assert(authorized);assert(record_file.brew_pending);response[0]=0;
     cJSON *j=cJSON_Parse(arg?arg:body);char path[96];assert(text_field(j,"path",path,sizeof path));
     file_t *f=lookup(path);
     if(strstr(url,"get_metadata")) {
@@ -86,7 +86,7 @@ static int http(const char *url,const char *body,size_t length,const char *type,
 static void reset(void) {
     clear_record();for(unsigned i=0;i<16;i++) {free(files[i].data);memset(&files[i],0,sizeof files[i]);}
     callbacks=write_count=metadata_count=csv_writes=json_writes=rev_counter=0;
-    refresh_ok=auth_current=true;allocation_fail=scope_missing=metadata_down=diagnostic=false;fault=NORMAL;last_error[0]=0;
+    refresh_ok=auth_current=clock_ok=true;allocation_fail=scope_missing=metadata_down=diagnostic=false;fault=NORMAL;last_error[0]=0;
 }
 static cw_brew_record_t brew(void) {
     return (cw_brew_record_t){.id="recovery-0001",.revision=1,.captured_us=100000000,.dose_cg=1500,.water_cg=23530,.beverage_cg=20450,.elapsed_ms=179900,.scales=2};
@@ -109,21 +109,77 @@ static void check_final(void) {
     assert(cJSON_GetObjectItemCaseSensitive(j,"extraction_percent")->valuedouble==20.95);
     assert(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(j,"probe_trace"),"samples")->valueint==2000);
     cJSON_Delete(j);file_t *csv=lookup("/brew-recovery-0001-trace.csv");assert(csv&&strstr(csv->data,"out_g"));
-    assert(!record_file.trace);
+    assert(!record_file.trace&&!record_file.brew_pending&&!retained_unsaved());
 }
 int main(void) {
     cw_brew_record_t r;
+    // Real production upload/reconciliation: a confirmed draft keeps the trace
+    // for future TDS, but Home abandoning that flow must not prevent idle OTA.
+    reset();r=brew();
+    assert(!upload_record(&r,trace_new()));
+    assert(record_file.trace&&record_file.json_hash[0]&&record_file.trace_hash[0]);
+    assert(!record_file.pending_hash[0]&&!record_file.trace_pending_hash[0]);
+    assert(!record_file.brew_pending&&!retained_unsaved());
+    // Rejected records must not mark the unrelated cached draft unconfirmed.
+    __typeof__(record_file) confirmed=record_file;
+    cw_brew_record_t wrong=r;strcpy(wrong.id,"wrong-id");wrong.revision=2;
+    assert(!strcmp(upload_record(&wrong,trace_new()),"draft_not_found"));
+    wrong.complete=true;assert(!strcmp(upload_record(&wrong,NULL),"draft_not_found"));
+    assert(!memcmp(&confirmed,&record_file,sizeof confirmed));
+    active_revision++;
+    assert(!strcmp(upload_record(&r,trace_new()),"authorization_changed"));
+    active_revision--;auth_current=false;
+    wrong.revision=1;wrong.complete=false;
+    assert(!strcmp(upload_record(&wrong,trace_new()),"authorization_changed"));
+    auth_current=true;assert(!memcmp(&confirmed,&record_file,sizeof confirmed));
+
+    // New resumed revision fails before network/hash updates despite confirmed
+    // old hashes: it remains unconfirmed until CSV AND its new JSON succeed.
+    r.revision=2;r.elapsed_ms=199900;refresh_ok=false;
+    cw_trace_snapshot_t *resumed=trace_new();resumed->samples[1999].weight_cg=23700;
+    assert(!strcmp(upload_record(&r,resumed),"refresh_failed"));
+    assert(record_file.trace==resumed&&record_file.brew_pending&&retained_unsaved());
+    assert(!record_file.pending_hash[0]&&!record_file.trace_pending_hash[0]);
+    __typeof__(record_file) unconfirmed=record_file;
+    wrong.revision=2;
+    assert(!strcmp(upload_record(&wrong,NULL),"draft_not_found"));
+    assert(!memcmp(&unconfirmed,&record_file,sizeof unconfirmed));
+    refresh_ok=true;scope_missing=true;
+    assert(!strcmp(upload_record(&r,NULL),"metadata_scope_required"));
+    assert(record_file.brew_pending&&retained_unsaved());scope_missing=false;
+    fault=FAIL_JSON;assert(!strcmp(upload_record(&r,NULL),"remote_content_conflict"));
+    assert(csv_writes==2&&json_writes==2&&record_file.brew_pending&&retained_unsaved());
+    assert(!upload_record(&r,NULL));
+    assert(record_file.trace&&!record_file.brew_pending&&!retained_unsaved());
+    assert(!record_file.pending_hash[0]&&!record_file.trace_pending_hash[0]);
+    // A new complete attempt must revoke prior draft confirmation even without
+    // a new snapshot, network access or pending hashes.
+    complete(&r);r.revision=3;clock_ok=false;
+    assert(!strcmp(upload_record(&r,NULL),"clock_sync_failed"));
+    assert(record_file.brew_pending&&retained_unsaved());
+    assert(!record_file.pending_hash[0]&&!record_file.trace_pending_hash[0]);
+    clock_ok=true;assert(!upload_record(&r,NULL));check_final();
+    puts("PASS confirmed cached draft allows idle OTA; resumed/complete failures block until confirmed");
+
+    // Even the first clock failure with no trace/hash must block maintenance.
+    reset();r=brew();clock_ok=false;
+    assert(!strcmp(upload_record(&r,NULL),"clock_sync_failed"));
+    assert(!record_file.trace&&!record_file.pending_hash[0]&&!record_file.trace_pending_hash[0]);
+    assert(record_file.brew_pending&&retained_unsaved()&&!write_count);
+    clock_ok=true;assert(!upload_record(&r,NULL));assert(!retained_unsaved());
+    puts("PASS first clock failure without snapshot or pending hashes remains unsaved");
+
     reset();r=brew();refresh_ok=false;cw_trace_snapshot_t *t=trace_new();
-    assert(!strcmp(upload_record(&r,t),"refresh_failed"));assert(record_file.trace==t&&write_count==0);
+    assert(!strcmp(upload_record(&r,t),"refresh_failed"));assert(record_file.trace==t&&write_count==0&&record_file.brew_pending&&retained_unsaved());
     refresh_ok=true;complete(&r);assert(!upload_record(&r,NULL));check_final();assert(csv_writes==1&&json_writes==1);
     puts("PASS first refresh failure -> complete create with retained 2000-sample dual-scale trace");
 
     reset();r=brew();fault=FAIL_JSON;assert(!strcmp(upload_record(&r,trace_new()),"upload_unconfirmed"));
-    assert(record_file.trace&&csv_writes==1&&!brew_file());complete(&r);assert(!upload_record(&r,NULL));check_final();assert(csv_writes==1&&json_writes==2);
+    assert(record_file.trace&&csv_writes==1&&!brew_file()&&record_file.brew_pending&&retained_unsaved());complete(&r);assert(!upload_record(&r,NULL));check_final();assert(csv_writes==1&&json_writes==2);
     puts("PASS CSV success / JSON absent failure -> verified complete recovery, no CSV replay");
 
     reset();r=brew();fault=LOST_JSON_NO_READBACK;assert(!strcmp(upload_record(&r,trace_new()),"remote_state_unknown"));
-    assert(brew_file()&&record_file.pending_hash[0]&&json_writes==1);metadata_down=false;complete(&r);
+    assert(brew_file()&&record_file.pending_hash[0]&&json_writes==1&&record_file.brew_pending&&retained_unsaved());metadata_down=false;complete(&r);
     assert(!upload_record(&r,NULL));check_final();assert(json_writes==2);
     puts("PASS ambiguous committed draft -> hash/rev reconciliation -> exact final update");
 
@@ -158,6 +214,7 @@ int main(void) {
     t=trace_new();t->samples[1999].weight_cg=23700;t->samples[1999].aux_cg=21000;
     fault=LOST_CSV_NO_READBACK;assert(!strcmp(upload_record(&r,t),"remote_state_unknown"));
     assert(record_file.trace==t&&record_file.trace_revision==2&&record_file.trace_pending_hash[0]);
+    assert(record_file.brew_pending&&retained_unsaved());
     assert(csv_writes==2&&json_writes==1);metadata_down=false;complete(&r);r.revision=3;
     assert(!upload_record(&r,NULL));check_final();assert(csv_writes==2&&json_writes==2);
     assert(strcmp(old_hash,record_file.trace_hash));assert(strstr(lookup("/brew-recovery-0001-trace.csv")->data,"237.0"));
@@ -185,5 +242,10 @@ int main(void) {
     refresh_ok=false;run_diagnostic();assert(!memcmp(&saved,&record_file,sizeof saved)&&callbacks==calls);
     allocation_fail=true;run_diagnostic();assert(!memcmp(&saved,&record_file,sizeof saved)&&callbacks==calls);allocation_fail=false;
     puts("PASS full synthetic diagnostic, refresh failure and allocation failure restore live recovery slot and suppress UI callbacks");
+    reset();r=brew();assert(!upload_record(&r,trace_new()));
+    saved=record_file;calls=callbacks;run_diagnostic();
+    assert(!memcmp(&saved,&record_file,sizeof saved)&&callbacks==calls);
+    assert(record_file.trace&&!record_file.brew_pending&&!retained_unsaved());
+    puts("PASS diagnostic also preserves confirmed cached draft and its cleared pending flag");
     reset();puts("all Dropbox reliability tests passed");return 0;
 }

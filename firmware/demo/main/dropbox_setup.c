@@ -11,6 +11,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
+#include "freertos/semphr.h"
 #include "esp_crt_bundle.h"
 #include "esp_http_client.h"
 #include "esp_netif_sntp.h"
@@ -40,7 +41,9 @@ static struct {
     char id[64],path[96],rev[64],created[21],trace_path[96];
     char json_hash[65],pending_hash[65];
     char trace_hash[65],trace_pending_hash[65],trace_rev[64];
-    unsigned authorization_revision,trace_samples,trace_revision;bool trace_truncated;
+    unsigned authorization_revision,trace_samples,trace_revision;bool trace_truncated,color_pending;
+    // Confirmation of the current brew attempt, independent of cached trace ownership.
+    bool brew_pending;
     int64_t captured_us;
     cw_trace_snapshot_t *trace;
 } record_file;
@@ -51,6 +54,59 @@ static portMUX_TYPE lock=portMUX_INITIALIZER_UNLOCKED;
 static QueueHandle_t commands;
 static atomic_bool occupied,have_credentials;
 static atomic_uint revision;
+// Task-only admission lock. pending covers reservations before queue send,
+// queued items, and dequeued work through its final cleanup (including callbacks).
+static SemaphoreHandle_t admission;
+static atomic_bool admission_ready;
+static atomic_uint pending;
+static bool maintenance;
+
+// Only inspect worker-owned recovery state under admission with pending == 0.
+static bool retained_unsaved(void) {
+    return record_file.brew_pending||record_file.pending_hash[0]||record_file.trace_pending_hash[0]||record_file.color_pending;
+}
+bool dropbox_setup_unsaved(void) {
+    if(!atomic_load(&admission_ready))return true;
+    xSemaphoreTake(admission,portMAX_DELAY);
+    bool unsaved=atomic_load(&pending)!=0||retained_unsaved();
+    xSemaphoreGive(admission);
+    return unsaved;
+}
+bool dropbox_setup_maintenance_begin(void) {
+    if(!atomic_load(&admission_ready))return false;
+    xSemaphoreTake(admission,portMAX_DELAY);
+    bool ok=!maintenance&&atomic_load(&pending)==0&&!retained_unsaved();
+    if(ok)maintenance=true;
+    xSemaphoreGive(admission);
+    return ok;
+}
+void dropbox_setup_maintenance_end(void) {
+    if(!atomic_load(&admission_ready))return;
+    xSemaphoreTake(admission,portMAX_DELAY);
+    maintenance=false;
+    xSemaphoreGive(admission);
+}
+bool dropbox_setup_busy(void) {
+    if(!atomic_load(&admission_ready))return true;
+    xSemaphoreTake(admission,portMAX_DELAY);
+    bool busy=maintenance||atomic_load(&pending)!=0||retained_unsaved();
+    xSemaphoreGive(admission);
+    return busy;
+}
+// Called with admission held (or during init before admission is published),
+// before exposing work to the queue.
+static void reserve_work(void) {atomic_fetch_add(&pending,1);}
+static void finish_work(void) {
+    xSemaphoreTake(admission,portMAX_DELAY);
+    configASSERT(atomic_load(&pending)>0);
+    if(atomic_fetch_sub(&pending,1)==1)atomic_store(&occupied,false);
+    xSemaphoreGive(admission);
+}
+static bool enqueue_work(queued_command_t *item) {
+    bool ok=xQueueSend(commands,item,0)==pdTRUE;
+    mbedtls_platform_zeroize(item,sizeof *item);
+    return ok; // Caller owns failure cleanup and then releases the reservation.
+}
 static char response[RESPONSE_MAX],access_token[2049];
 static uint32_t active_revision;
 static bool current(void) {return active_revision==atomic_load(&revision);}
@@ -299,6 +355,7 @@ static const char *upload_record(const cw_brew_record_t *input,cw_trace_snapshot
     cw_brew_record_t copy=*input,*r=&copy;r->trace_path[0]=0;r->trace_samples=0;r->trace_truncated=false;
     char path[96]="",json[1536];const char *error=NULL;
     record_status(r,CW_RECORD_SAVING,NULL,NULL);
+    if(!current()) {error="authorization_changed";goto finished;}
     if(strcmp(record_file.id,r->id)) {
         if(r->complete||r->revision!=1) {error="draft_not_found";goto finished;}
         clear_record();snprintf(record_file.id,sizeof record_file.id,"%.63s",r->id);
@@ -306,6 +363,9 @@ static const char *upload_record(const cw_brew_record_t *input,cw_trace_snapshot
         snprintf(record_file.path,sizeof record_file.path,"/%s%.63s.json",diagnostic?"":"brew-",r->id);
     }
     if(record_file.authorization_revision!=active_revision) {error="authorization_changed";goto finished;}
+    // An owned attempt supersedes prior confirmation even if it fails before
+    // producing a pending hash. Retaining a confirmed draft trace is only a cache.
+    record_file.brew_pending=true;
     if(trace&&!r->complete&&r->revision>=record_file.trace_revision) {
         free(record_file.trace);record_file.trace=trace;trace=NULL;record_file.trace_revision=r->revision;
     }
@@ -332,7 +392,10 @@ static const char *upload_record(const cw_brew_record_t *input,cw_trace_snapshot
         strcpy(end,label);
     }
     error=reliable_upload(path,json,strlen(json),record_file.json_hash,record_file.pending_hash,record_file.rev);
-    if(!error&&r->complete) {free(record_file.trace);record_file.trace=NULL;}
+    if(!error) {
+        record_file.brew_pending=false; // JSON confirmed, after CSV confirmation.
+        if(r->complete) {free(record_file.trace);record_file.trace=NULL;}
+    }
 finished:
     free(trace);record_status(r,error?CW_RECORD_FAILED:CW_RECORD_SAVED,path,error);return error;
 }
@@ -385,6 +448,7 @@ static void upload_color(const rc_record_t *r) {
     error=upload_error(upload(path,mode,json,strlen(json),rev,sizeof rev),"record_upload_failed","record_changed_elsewhere","record_response_invalid","record_readback_failed");
     if(!error) {snprintf(record_file.path,sizeof record_file.path,"%s",path);snprintf(record_file.rev,sizeof record_file.rev,"%s",rev);}
 finished:
+    record_file.color_pending=error!=NULL;
     color_status(r,error?CW_RECORD_FAILED:CW_RECORD_SAVED,path,error);
 }
 static void finish_auth(void) {
@@ -413,6 +477,7 @@ static void begin_auth(const cw_dropbox_command_t *c) {
 }
 static void dropbox_task(void *arg) {
     active_revision=atomic_load(&revision);bool saved=load();set_state(saved?"saved":"unconfigured",NULL);mbedtls_platform_zeroize(&account,sizeof account);
+    finish_work(); // Initialization also reads credentials and publishes state.
     queued_command_t item;
     for(;;) {
         if(xQueueReceive(commands,&item,portMAX_DELAY)!=pdTRUE)continue;
@@ -439,35 +504,63 @@ static void dropbox_task(void *arg) {
             mbedtls_platform_zeroize(&command,sizeof command);
         }
         mbedtls_platform_zeroize(&item,sizeof item);wipe_session();mbedtls_platform_zeroize(&account,sizeof account);
-        if(uxQueueMessagesWaiting(commands)==0)atomic_store(&occupied,false);
+        finish_work();
     }
 }
 void dropbox_setup_init(void) {
+    admission=xSemaphoreCreateMutex();configASSERT(admission);
     commands=xQueueCreate(8,sizeof(queued_command_t));configASSERT(commands);
+    reserve_work(); // Prevent maintenance from overlapping worker initialization.
     esp_sntp_config_t config=ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");config.start=false;ESP_ERROR_CHECK(esp_netif_sntp_init(&config));
     configASSERT(xTaskCreate(dropbox_task,"dropbox",12288,NULL,3,NULL)==pdPASS);
+    atomic_store(&admission_ready,true);
 }
 bool dropbox_setup_submit(const cw_dropbox_command_t *c) {
-    if(c->op<1||c->op>4)return false;
-    if(c->op!=2&&atomic_exchange(&occupied,true))return false;
-    if(c->op==2) {if(uxQueueMessagesWaiting(commands))return false;atomic_store(&occupied,true);}
+    if(c->op<1||c->op>4||!atomic_load(&admission_ready))return false;
+    xSemaphoreTake(admission,portMAX_DELAY);
+    if(maintenance||(c->op!=2&&atomic_load(&occupied))||(c->op==2&&uxQueueMessagesWaiting(commands))) {
+        xSemaphoreGive(admission);return false;
+    }
+    atomic_store(&occupied,true);
     queued_command_t item={.command=*c,.revision=(c->op==3||c->op==4)?atomic_load(&revision):atomic_fetch_add(&revision,1)+1};
-    bool ok=xQueueSend(commands,&item,0)==pdTRUE;mbedtls_platform_zeroize(&item,sizeof item);
-    if(!ok&&uxQueueMessagesWaiting(commands)==0)atomic_store(&occupied,false);
+    reserve_work();
+    xSemaphoreGive(admission);
+    bool ok=enqueue_work(&item);
+    if(!ok)finish_work();
     return ok;
 }
 bool dropbox_setup_record(const cw_brew_record_t *record,cw_trace_snapshot_t *trace) {
-    if(!atomic_load(&have_credentials)) {free(trace);record_status(record,CW_RECORD_FAILED,NULL,"authorize_first");return false;}
-    queued_command_t item={.revision=atomic_load(&revision),.brew=true,.record=*record,.trace=trace};
-    bool ok=xQueueSend(commands,&item,0)==pdTRUE;mbedtls_platform_zeroize(&item,sizeof item);
-    if(!ok) {free(trace);record_status(record,CW_RECORD_FAILED,NULL,"record_queue_full");}
+    const char *error=NULL;
+    unsigned item_revision=0;
+    if(!atomic_load(&admission_ready))error="record_queue_full";
+    else {
+        xSemaphoreTake(admission,portMAX_DELAY);
+        if(maintenance)error="maintenance_busy";
+        else if(!atomic_load(&have_credentials))error="authorize_first";
+        else {reserve_work();item_revision=atomic_load(&revision);}
+        xSemaphoreGive(admission);
+    }
+    if(error) {free(trace);record_status(record,CW_RECORD_FAILED,NULL,error);return false;}
+    queued_command_t item={.revision=item_revision,.brew=true,.record=*record,.trace=trace};
+    bool ok=enqueue_work(&item);
+    if(!ok) {free(trace);record_status(record,CW_RECORD_FAILED,NULL,"record_queue_full");finish_work();}
     return ok;
 }
 bool dropbox_setup_color(const rc_record_t *record) {
-    if(!atomic_load(&have_credentials)) {color_status(record,CW_RECORD_FAILED,NULL,"authorize_first");return false;}
-    queued_command_t item={.revision=atomic_load(&revision),.color=true,.color_record=*record};
-    bool ok=xQueueSend(commands,&item,0)==pdTRUE;mbedtls_platform_zeroize(&item,sizeof item);
-    if(!ok)color_status(record,CW_RECORD_FAILED,NULL,"record_queue_full");
+    const char *error=NULL;
+    unsigned item_revision=0;
+    if(!atomic_load(&admission_ready))error="record_queue_full";
+    else {
+        xSemaphoreTake(admission,portMAX_DELAY);
+        if(maintenance)error="maintenance_busy";
+        else if(!atomic_load(&have_credentials))error="authorize_first";
+        else {reserve_work();item_revision=atomic_load(&revision);}
+        xSemaphoreGive(admission);
+    }
+    if(error) {color_status(record,CW_RECORD_FAILED,NULL,error);return false;}
+    queued_command_t item={.revision=item_revision,.color=true,.color_record=*record};
+    bool ok=enqueue_work(&item);
+    if(!ok) {color_status(record,CW_RECORD_FAILED,NULL,"record_queue_full");finish_work();}
     return ok;
 }
 int dropbox_setup_status(char *out,int capacity) {

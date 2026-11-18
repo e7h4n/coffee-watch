@@ -11,10 +11,23 @@ There is no simulated measurement or offline mode in this firmware.
 
 ```sh
 python3 fetch_drivers.py
-# Activate ESP-IDF 5.5.x, then:
-IDF_COMPONENT_MANAGER=0 idf.py build
-idf.py -p /dev/cu.YOUR_STOPWATCH_PORT flash
+# Activate exactly ESP-IDF 5.5.2, then build (no device writes):
+idf.py -DPROJECT_VER=dev build
 ```
+
+The current target is schema-2 A/B OTA, **not the legacy factory layout**. Do not
+run generic `idf.py flash` or an app-only write at a fixed address on an existing
+watch. First migration needs explicit approval, guarded private full-flash/NVS/PHY
+backups, compatibility checks, and four narrowly scoped USB writes. It is not
+atomic and the first USB boot cannot roll back the old layout. Read
+[firmware update and USB recovery](../../spec/firmware-update.md) before any write.
+Later updates use Home → Firmware → Download → Restart & install. PR CI provides
+a versioned candidate ZIP; only `main` publishes a public GitHub Release.
+
+An ignored existing `sdkconfig` overrides `sdkconfig.defaults`. Build with a clean
+configuration (or deliberately migrate all OTA, watchdog and memory settings);
+packaging refuses incompatible settings. The reserved 7.93 MiB storage partition
+is not formatted or used as a curve/outbox store in this change.
 
 The helper pins M5Stack M5GFX 0.2.19, M5IOE1 1.0.8 and M5PM1 1.0.6 by full commit.
 PM/IO drivers share a native ESP-IDF I2C bus with touch using their documented
@@ -95,6 +108,8 @@ These primary product rules are evaluated only when weight notifications arrive;
   without sending a duplicate stop or fabricating another completion.
 - Hold both keys 900ms on any page: Home (ends the brew session or leaves roast
   color). Chord consumes short actions. Next held on the brewer carousel is Home too.
+  Exception: the firmware modal cancels a busy updater and waits for worker
+  acknowledgement before releasing Dropbox admission or returning Home.
 - Reports ignore short physical presses; swipe or long Home/Back only.
 - Scale loss interrupts the current brew and clears the stability window. Long
   Home begins a new session; reconnect never automatically resumes old brewing.
@@ -106,7 +121,9 @@ RS source. Missing events remain pending until explicit cancellation/Home.
 ## Development console
 
 `status`, `screen`, `home`, `next`, `select`, `back`, `mode`, `open brew` and
-`open color` are diagnostic commands.
+`open color` are diagnostic commands. `update status`, `update open`, and
+`update cancel` use the same protected updater; no serial command bypasses its
+explicit install confirmation, idle/battery or pending-upload checks.
 They invoke the same UI actions; there is no command to inject a measurement.
 `screen` emits SCREEN565/PX rows for inspecting the real framebuffer. Capture
 with `tools/ble_capture.py --quiet-rx --quiet-pixels` to suppress raw screen rows
@@ -140,6 +157,7 @@ On every screen, 10 minutes without touch/button interaction or a state change
 powers off StopWatch through M5PM1. Page/session, scale phase, connection and
 interruption transitions restart the interval. Weight notifications, timer display
 updates, rendering and diagnostic status reads do not keep the device awake.
+A busy firmware check/download suppresses idle shutdown until its worker is idle.
 
 ## Shared visuals and motion
 
@@ -194,6 +212,8 @@ after connection; no password is returned or logged. Close/Back stops BLE setup
 without shutting down Wi-Fi. Boot makes one attempt to join the saved network;
 there are no automatic reconnect loops or alternative provisioning paths.
 
-The custom 4 MiB factory partition keeps the original NVS/PHY offsets. Flash the
-complete project, including its partition table, when upgrading from an older
-firmware. See [the protocol and browser guide](../../spec/wifi.md).
+The A/B table preserves the original NVS (`0x9000..0xefff`) and PHY
+(`0xf000..0xffff`) offsets. Never erase NVS, format storage, or replace the table
+as an ordinary application update. The separately approved first USB migration
+and subsequent slot-only OTA path are in [the update guide](../../spec/firmware-update.md).
+See also [the protocol and browser guide](../../spec/wifi.md).

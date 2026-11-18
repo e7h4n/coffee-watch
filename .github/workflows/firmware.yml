@@ -1,0 +1,122 @@
+name: Firmware build and release
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# PR code never receives a write token or deployment secrets. No pull_request_target.
+permissions:
+  contents: read
+
+jobs:
+  native:
+    # The native RS fixture uses real mbedTLS AES-CBC on Linux.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Provision pinned native cJSON and mbedTLS sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none --depth 1 --sparse --branch v5.5.2 \
+            https://github.com/espressif/esp-idf.git "$RUNNER_TEMP/idf-native"
+          cd "$RUNNER_TEMP/idf-native"
+          test "$(git rev-parse HEAD)" = 30aaf64524299d3bde422ca9a2848090d1bc5d0f
+          git sparse-checkout set components/json components/mbedtls
+          git submodule update --init --depth 1 --recursive -- \
+            components/json/cJSON components/mbedtls/mbedtls
+          echo "IDF_PATH=$RUNNER_TEMP/idf-native" >> "$GITHUB_ENV"
+          python3 -m venv "$RUNNER_TEMP/native-venv"
+          "$RUNNER_TEMP/native-venv/bin/python" -m pip install esptool==4.11.0
+      - name: Native Python and C/C++ tests (zero skips required)
+        env:
+          CC: clang
+          CXX: clang++
+        shell: bash
+        run: |
+          "$RUNNER_TEMP/native-venv/bin/python" - <<'PY'
+          import sys
+          import unittest
+          suite = unittest.defaultTestLoader.discover('tools', pattern='test_*.py')
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          if result.skipped:
+              print('CI requires all native coverage, no skipped tests:', result.skipped)
+          sys.exit(0 if result.wasSuccessful() and not result.skipped else 1)
+          PY
+
+  build:
+    needs: native
+    runs-on: ubuntu-24.04
+    container:
+      image: espressif/idf:v5.5.2
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Fetch commit-verified board drivers
+        run: python3 firmware/demo/fetch_drivers.py
+      - name: Build ESP32-S3 with exact compiled release/candidate version
+        shell: bash
+        env:
+          RELEASE_VERSION: v0.1.${{ github.run_number }}
+        run: |
+          . "$IDF_PATH/export.sh"
+          idf.py --version | grep -Fx 'ESP-IDF v5.5.2'
+          cd firmware/demo
+          # Never inherit a developer's generated sdkconfig/build from a checkout.
+          rm -f sdkconfig sdkconfig.old
+          idf.py -B build-ci -DIDF_TARGET=esp32s3 -DPROJECT_VER="$RELEASE_VERSION" build
+          python3 ../../tools/package_firmware.py --build-dir build-ci --out ../../dist --version "$RELEASE_VERSION"
+      - name: Upload application, strict manifest, checksums and USB-only ZIP
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coffee-watch-v0.1.${{ github.run_number }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    # The only job with a write token; runs no checked-out repository code.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [native, build]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      actions: read
+    # No concurrency queue: GitHub drops older pending jobs in such a queue,
+    # which would silently skip releases for pushes.
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: coffee-watch-v0.1.${{ github.run_number }}
+          path: dist
+      - name: Publish immutable run-number release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: v0.1.${{ github.run_number }}
+          COMMIT: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum --check SHA256SUMS
+          test "$(gh api "repos/$GH_REPO" --jq '.private')" = false
+          # Atomic no-overwrite ref creation rejects existing lightweight/annotated
+          # tags, existing releases and ambiguous lookup/network failures alike.
+          # --target alone would silently reuse a pre-existing mismatched tag.
+          actual=$(gh api --method POST "repos/$GH_REPO/git/refs" \
+            -f ref="refs/tags/$VERSION" -f sha="$COMMIT" --jq '.object.sha')
+          test "$actual" = "$COMMIT"
+          gh release create "$VERSION" --repo "$GH_REPO" --target "$COMMIT" --verify-tag \
+            --title "Coffee Watch $VERSION" --draft --latest=false \
+            --notes 'ESP32-S3 / 16MiB / partition schema 2. OTA uses ONLY the app .bin and latest.json. The separate USB migration ZIP is NOT an OTA image. Read spec/firmware-update.md before first USB migration. TLS + hashes, no publisher signature or eFuse changes.' \
+            ./*.bin ./latest.json ./SHA256SUMS ./*-usb-migration.zip
+          release_id=$(gh release view "$VERSION" --json databaseId --jq '.databaseId')
+          # Publish only after every asset was uploaded. GitHub computes latest
+          # server-side using semantic versions, not a racing client-side pointer.
+          gh api --method PATCH "repos/$GH_REPO/releases/$release_id" \
+            -F draft=false -F prerelease=false -f make_latest=legacy

@@ -12,6 +12,25 @@ extern "C" {
 typedef enum {CW_RECORD_SAVING,CW_RECORD_SAVED,CW_RECORD_FAILED} cw_record_sync_t;
 typedef struct {cw_record_sync_t state;char id[64],path[96],error[40];unsigned revision;} cw_record_status_t;
 void dropbox_setup_init(void);
+// Task-only admission decision (short mutex, no worker wait/network/cancel). Begin
+// succeeds only after initialization, with no queued/active work or retained
+// unsaved recovery state, and no existing maintenance holder. While held, ALL
+// submits fail without changing authorization/settings; record takes trace
+// ownership even on rejection. The successful caller must pair begin with end.
+// End only releases admission; neither operation erases settings/recovery data.
+// Do not call these APIs from an ISR.
+bool dropbox_setup_maintenance_begin(void);
+void dropbox_setup_maintenance_end(void);
+// True if uninitialized, maintenance-held, queued/active, or retained unsaved.
+bool dropbox_setup_busy(void);
+// Conservative pending-upload signal: true while uninitialized/queued/active
+// (worker-owned recovery state cannot yet be inspected), or when an idle worker
+// retains an unconfirmed brew attempt, unresolved upload hashes, or failed color
+// upload. A trace cached after confirmed CSV + draft JSON does not block admission;
+// every owned resumed/final attempt blocks again until its JSON is confirmed,
+// even on pre-network failure with empty pending hashes. Does not count maintenance
+// alone. No automatic discard is implied by either query.
+bool dropbox_setup_unsaved(void);
 // Takes ownership of trace (may be NULL), retaining it across failed draft/final
 // uploads in one volatile worker-owned recovery slot. Pass a new snapshot for
 // EVERY non-complete draft, including resumed drafts: newer same-ID snapshots

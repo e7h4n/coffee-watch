@@ -1,10 +1,14 @@
 #pragma once
 #include "board.h"
+#include "firmware_update.h"
 #include "demo.h"
 // Home (the app chooser) is drawn from these; set every frame by the main loop.
 // Two-scale brewing, display only: the cup scale's beverage and drip (out) flow.
 struct DualView {bool active=false;int scales=1;bool out_valid=false;float out_gps=0;int32_t out_cg=0;bool open_valid=false;uint32_t open_ms=0;};
 struct UiState {bool home=false,home_scale=false,home_color=false;char home_scales[24]={};DualView dual;bool wifi_setup=false;cw_network_view_t network={};cw_record_status_t record={};bool record_visible=false;int battery_percent=-1;int held=0;int carousel_dir=0;unsigned carousel_from=0;float carousel_progress=0;
+    bool firmware_open=false,firmware_primary_enabled=false;
+    firmware_update_status_t firmware_update={};
+    char firmware_current[32]={},firmware_notice[64]={};
     // Result pages (Waiting TDS / Report). Display-only: turning pages never changes flow.
     int result_page=0;int64_t page_us=0;};
 // Waiting TDS: summary, curve. Report: report, TDS/extraction chart, curve.
@@ -17,7 +21,7 @@ void ui_draw(const cw_flow_t &flow,const UiState &ui);
 int ui_hit(const cw_flow_t &flow,int x,int y,const UiState *ui=nullptr);
 bool ui_enabled(const cw_flow_t &flow,int action,const UiState *ui=nullptr);
 // Home actions: 1 Wi-Fi setup (bottom), 2 Brew (scale connected), 3 Roast color (sensor attached).
-enum {UI_HOME_WIFI=1,UI_HOME_BREW=2,UI_HOME_COLOR=3};
+enum {UI_HOME_WIFI=1,UI_HOME_BREW=2,UI_HOME_COLOR=3,UI_HOME_FIRMWARE=4,UI_FIRMWARE_BACK=5};
 
 // Roast-color mode (a MAX30101 answered at boot). Display-only view of the meter.
 enum ColorPage {COLOR_WARMUP,COLOR_PLACE,COLOR_MEASURING,COLOR_READING,COLOR_RESULT,COLOR_SATURATED,COLOR_NO_DATA,
