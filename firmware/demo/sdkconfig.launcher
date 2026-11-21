@@ -1,0 +1,8 @@
+# esp-launcher app variant: build with
+#   idf.py -B build-launcher -DSDKCONFIG=build-launcher/sdkconfig \
+#     -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.launcher" build
+# The watch must keep working offline: it validates itself after local health checks and
+# never falls back to the launcher just because the hub is unreachable.
+CONFIG_CW_LAUNCHER_APP=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions-launcher.csv"
+CONFIG_OKOU_MAX_FAIL_BOOTS=0
