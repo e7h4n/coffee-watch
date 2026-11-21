@@ -81,6 +81,9 @@ jobs:
             -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.launcher" -DPROJECT_VER="$RELEASE_VERSION" build
           grep -Fx 'CONFIG_CW_LAUNCHER_APP=y' build-launcher/sdkconfig
           grep -Fx 'CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions-launcher.csv"' build-launcher/sdkconfig
+          grep -Fx '# CONFIG_ESP_WIFI_IRAM_OPT is not set' build-launcher/sdkconfig
+          grep -Fx '# CONFIG_ESP_WIFI_RX_IRAM_OPT is not set' build-launcher/sdkconfig
+          grep -Fx 'CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y' build-launcher/sdkconfig
           mkdir -p ../../dist-launcher
           cp build-launcher/coffee_watch_demo.bin "../../dist-launcher/coffee-watch-launcher-app-$RELEASE_VERSION-esp32s3.bin"
           cp build-launcher/coffee_watch_demo.elf "../../dist-launcher/coffee-watch-launcher-app-$RELEASE_VERSION-esp32s3.elf"
