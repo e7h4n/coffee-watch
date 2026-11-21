@@ -3,9 +3,12 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-/* Starts the esp-launcher SDK when CONFIG_CW_LAUNCHER_APP=y (no-op otherwise). Call after
- * wifi_setup_init() and transport_init(): the watch keeps owning Wi-Fi, the SDK only waits for an
- * IP address, and BLE must get its internal RAM before the SDK allocates anything. */
+/* CONFIG_CW_LAUNCHER_APP=y (no-ops otherwise):
+ * cw_launcher_net_start(): called by wifi_setup_init() instead of the watch's own Wi-Fi bring-up.
+ *   Starts the okou_agent SDK with SDK-managed Wi-Fi (networks shared with the launcher); its large
+ *   buffers live in PSRAM so BLE still gets its internal RAM.
+ * cw_launcher_app_start(): after transport_init(); registers the remote commands. */
+void cw_launcher_net_start(void);
 void cw_launcher_app_start(void);
 /* Provided by main.cpp: queue one serial-console line for the main loop. */
 bool cw_console_enqueue(const char *line);
