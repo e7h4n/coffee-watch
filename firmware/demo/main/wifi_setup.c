@@ -7,6 +7,7 @@
 #include "sdkconfig.h"
 #if CONFIG_CW_LAUNCHER_APP
 #include "okou_agent_ext.h"
+#include "esp_netif_sntp.h"
 #endif
 #include <stdio.h>
 #include <string.h>
@@ -178,10 +179,11 @@ static void station_ip(char *ip,size_t n) {
     esp_netif_t *nf=esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");esp_netif_ip_info_t info;
     if(nf&&esp_netif_get_ip_info(nf,&info)==ESP_OK&&info.ip.addr)snprintf(ip,n,IPSTR,IP2STR(&info.ip));else ip[0]=0;
 }
+static atomic_bool sntp_ready; /* set once dropbox_setup_init() has initialised SNTP */
 static void network_task(void *arg) {
     migrate_legacy_network();
     portENTER_CRITICAL(&lock);view.saved=okou_wifi_count()>0;portEXIT_CRITICAL(&lock);
-    bool was_up=false;bool first=true;char last_ssid[33]="";network_command_t c;
+    bool was_up=false;bool first=true;bool sntp_started=false;char last_ssid[33]="";network_command_t c;
     for(;;) {
         if(xQueueReceive(network_queue,&c,pdMS_TO_TICKS(1000))==pdTRUE) {
             if(c.op==1) { /* join from the Coffee Watch page: add to the shared list; the SDK connects */
@@ -203,6 +205,12 @@ static void network_task(void *arg) {
         }
         char ssid[33]="",ip[16]="";bool up=okou_net_has_ip()&&okou_wifi_current(ssid,sizeof ssid);
         if(up)station_ip(ip,sizeof ip);
+        /* The standalone build sets the clock through its update check; this variant has none, and
+         * TLS (hub, Dropbox) verifies certificate dates, so start SNTP on the first IP. */
+        if(up&&!sntp_started&&atomic_load(&sntp_ready)) {
+            esp_err_t rc=esp_netif_sntp_start();sntp_started=rc==ESP_OK;
+            if(rc!=ESP_OK)ESP_LOGW("wifi","SNTP start failed: %s",esp_err_to_name(rc));
+        }
         if(first||up!=was_up||strcmp(ssid,last_ssid)) {
             first=false;
             network_state(up?CW_NET_CONNECTED:(okou_wifi_count()?CW_NET_CONNECTING:CW_NET_UNCONFIGURED),0,up?ssid:"",up?ip:NULL);
@@ -341,6 +349,7 @@ void wifi_setup_init(void) {
     cw_launcher_net_start(); /* SDK: netif, Wi-Fi driver, shared networks, hub agent */
     configASSERT(xTaskCreate(network_task,"wifi-config",4096,NULL,4,NULL)==pdPASS);
     dropbox_setup_init();
+    atomic_store(&sntp_ready,true);
 #else
     ESP_ERROR_CHECK(esp_netif_init());ESP_ERROR_CHECK(esp_event_loop_create_default());
     station_interface=esp_netif_create_default_wifi_sta();configASSERT(station_interface);
