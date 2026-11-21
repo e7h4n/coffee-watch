@@ -5,4 +5,4 @@ dependencies:
   okou_agent:
     git: https://github.com/e7h4n/esp-launcher.git
     path: firmware/components/okou_agent
-    version: 771233cabb000c83c5adf01ac08424cf03202672
+    version: 93c8c2aac18b5421b0b4140958561b099ac01f44

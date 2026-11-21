@@ -8,3 +8,7 @@ CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions-launcher.csv"
 CONFIG_OKOU_MAX_FAIL_BOOTS=0
 # Full ELF SHA-256 in core dumps so esp-launcher tools/symbolize.py can match the exact ELF.
 CONFIG_APP_RETRIEVE_LEN_ELF_SHA=64
+# Crash evidence for the launcher's coredump op (coredump partition exists in the launcher layout).
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
+CONFIG_ESP_COREDUMP_CHECKSUM_CRC32=y
