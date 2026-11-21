@@ -322,6 +322,12 @@ esp_err_t firmware_update_init(void)
     if (s_worker) return ESP_OK;
     if (!s_mutex) s_mutex = xSemaphoreCreateMutex();
     if (!s_mutex) return ESP_ERR_NO_MEM;
+#if CONFIG_CW_LAUNCHER_APP
+    /* Updates are installed by esp-launcher through the hub; this app never writes slots. */
+    s_status.state = FIRMWARE_UPDATE_ERROR; s_status.error = ESP_ERR_NOT_SUPPORTED;
+    snprintf(s_status.message, sizeof(s_status.message), "Updates are installed by esp-launcher");
+    return ESP_OK;
+#endif
     esp_err_t supported = layout(NULL, false);
     if (supported == ESP_OK) supported = transport_supported();
     if (supported != ESP_OK) {
@@ -405,6 +411,15 @@ esp_err_t firmware_update_activate_and_restart(bool lock_owned)
 }
 esp_err_t firmware_update_mark_running_valid_after_health(bool ui, bool nvs)
 {
+#if CONFIG_CW_LAUNCHER_APP
+    /* No updater worker in the launcher variant; the same local health gate (rendered UI, NVS,
+     * ten seconds of main-loop heartbeats) marks the launcher-installed image valid. */
+    if (!ui || !nvs) return ESP_ERR_INVALID_STATE;
+    esp_ota_img_states_t st;
+    esp_err_t e = esp_ota_get_state_partition(esp_ota_get_running_partition(), &st);
+    if (e == ESP_OK && st == ESP_OTA_IMG_PENDING_VERIFY) e = esp_ota_mark_app_valid_cancel_rollback();
+    return e;
+#endif
     if (!ui || !nvs || !s_worker) return ESP_ERR_INVALID_STATE;
     LOCK();
     esp_err_t err = s_status.busy ? ESP_ERR_INVALID_STATE : layout(NULL, false);

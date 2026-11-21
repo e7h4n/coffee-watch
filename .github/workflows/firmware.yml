@@ -70,6 +70,28 @@ jobs:
           rm -f sdkconfig sdkconfig.old
           idf.py -B build-ci -DIDF_TARGET=esp32s3 -DPROJECT_VER="$RELEASE_VERSION" build
           python3 ../../tools/package_firmware.py --build-dir build-ci --out ../../dist --version "$RELEASE_VERSION"
+      - name: Build esp-launcher app variant (remote logs/commands, updates via hub)
+        shell: bash
+        env:
+          RELEASE_VERSION: v0.1.${{ github.run_number }}
+        run: |
+          . "$IDF_PATH/export.sh"
+          cd firmware/demo
+          idf.py -B build-launcher -DIDF_TARGET=esp32s3 -DSDKCONFIG=build-launcher/sdkconfig \
+            -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.launcher" -DPROJECT_VER="$RELEASE_VERSION" build
+          grep -Fx 'CONFIG_CW_LAUNCHER_APP=y' build-launcher/sdkconfig
+          grep -Fx 'CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions-launcher.csv"' build-launcher/sdkconfig
+          mkdir -p ../../dist-launcher
+          cp build-launcher/coffee_watch_demo.bin "../../dist-launcher/coffee-watch-launcher-app-$RELEASE_VERSION-esp32s3.bin"
+          cp build-launcher/coffee_watch_demo.elf "../../dist-launcher/coffee-watch-launcher-app-$RELEASE_VERSION-esp32s3.elf"
+          (cd ../../dist-launcher && sha256sum * > SHA256SUMS)
+      - name: Upload esp-launcher app variant (unsigned; signed by esp-launcher CI)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coffee-watch-launcher-app-v0.1.${{ github.run_number }}
+          path: dist-launcher/*
+          if-no-files-found: error
+          retention-days: 30
       - name: Upload application, strict manifest, checksums and USB-only ZIP
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
