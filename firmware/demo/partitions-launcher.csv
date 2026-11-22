@@ -1,14 +1,12 @@
-# Copied from e7h4n/esp-launcher firmware/partitions/16mb-legacy.csv; keep in sync.
-# esp-launcher 16 MB layout compatible with the classic IDF dual-OTA layout used by
-# e7h4n/coffee-watch (PR #11): nvs, phy_init, otadata and the 0x812000 storage partition keep
-# their offsets, so a USB migration rewrites only the partition table, otadata and the app area
-# and every byte of settings and stored data survives.
+# esp-launcher 16 MB layout (M5Stack StopWatch / ESP32-S3, also used for ESP32 QEMU).
+# Labels are fixed by docs/protocol.md. NVS stays at the IDF default 0x9000/0x6000 so
+# existing Wi-Fi settings survive a USB re-flash that skips this range.
 # Name,       Type, SubType,  Offset,   Size
 nvs,          data, nvs,      0x9000,   0x6000
-phy_init,     data, phy,      0xf000,   0x1000
-launcher_a,   app,  ota_0,    0x10000,  0x280000
-launcher_b,   app,  ota_1,    0x290000, 0x280000
-app,          app,  ota_2,    0x510000, 0x2F0000
-coredump,     data, coredump, 0x800000, 0x10000
-otadata,      data, ota,      0x810000, 0x2000
-storage,      data, spiffs,   0x812000, 0x7EE000
+otadata,      data, ota,      0xf000,   0x2000
+phy_init,     data, phy,      0x11000,  0x1000
+launcher_a,   app,  ota_0,    0x20000,  0x200000
+launcher_b,   app,  ota_1,    0x220000, 0x200000
+app,          app,  ota_2,    0x420000, 0x400000
+coredump,     data, coredump, 0x820000, 0x10000
+data,         data, littlefs, 0x830000, 0x7D0000

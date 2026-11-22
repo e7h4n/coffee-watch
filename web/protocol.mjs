@@ -77,7 +77,9 @@ export class WatchConnection extends EventTarget {
       const server = await device.gatt.connect();
       step = 'Discovering Wi-Fi service';this.emit('progress', step);
       const service = await server.getPrimaryService(SERVICE);
-      const config = await service.getCharacteristic(CONFIG);
+      let config;
+      try { config = await service.getCharacteristic(CONFIG); }
+      catch (error) { if (error.name !== 'NotFoundError') throw error; }
       const status = await service.getCharacteristic(STATUS);
       const signal = await service.getCharacteristic(SIGNAL);
       const dropboxConfig = await service.getCharacteristic(DROPBOX_CONFIG);

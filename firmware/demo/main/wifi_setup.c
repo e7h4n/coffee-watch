@@ -36,8 +36,8 @@ static atomic_bool ble_ready,requested_open;
 static uint8_t own_type;
 static uint16_t browser=BLE_HS_CONN_HANDLE_NONE,signal_handle;
 static struct ble_npl_event control_event,notify_event;
-static QueueHandle_t network_queue;
 #if !CONFIG_CW_LAUNCHER_APP
+static QueueHandle_t network_queue;
 static esp_netif_t *station_interface;
 #endif
 static char status_json[384];
@@ -46,7 +46,9 @@ static char dropbox_json[512];static int dropbox_length;
 enum {OP_START=10,OP_DOWN,OP_IP};
 typedef struct {cw_wifi_packet_t packet;int op,reason;uint32_t ip_address;char ip[16];} network_command_t;
 static const ble_uuid128_t service_uuid=BLE_UUID128_INIT(0x47,0xb6,0x99,0x76,0x4e,0x5b,0x21,0xa6,0x55,0x4f,0x9d,0x9a,0x01,0x10,0xa8,0xc9);
+#if !CONFIG_CW_LAUNCHER_APP
 static const ble_uuid128_t config_uuid=BLE_UUID128_INIT(0x47,0xb6,0x99,0x76,0x4e,0x5b,0x21,0xa6,0x55,0x4f,0x9d,0x9a,0x02,0x10,0xa8,0xc9);
+#endif
 static const ble_uuid128_t status_uuid=BLE_UUID128_INIT(0x47,0xb6,0x99,0x76,0x4e,0x5b,0x21,0xa6,0x55,0x4f,0x9d,0x9a,0x03,0x10,0xa8,0xc9);
 static const ble_uuid128_t signal_uuid=BLE_UUID128_INIT(0x47,0xb6,0x99,0x76,0x4e,0x5b,0x21,0xa6,0x55,0x4f,0x9d,0x9a,0x04,0x10,0xa8,0xc9);
 static const ble_uuid128_t dropbox_config_uuid=BLE_UUID128_INIT(0x47,0xb6,0x99,0x76,0x4e,0x5b,0x21,0xa6,0x55,0x4f,0x9d,0x9a,0x05,0x10,0xa8,0xc9);
@@ -64,6 +66,7 @@ static void network_state(cw_net_state_t state,int reason,const char *ssid,const
     if(ssid)snprintf(view.ssid,sizeof view.ssid,"%s",ssid);
     snprintf(view.ip,sizeof view.ip,"%s",ip?ip:"");portEXIT_CRITICAL(&lock);publish();
 }
+#if !CONFIG_CW_LAUNCHER_APP
 static void request_state(uint32_t request,cw_net_state_t state,int reason,const char *ssid) {
     portENTER_CRITICAL(&lock);view.request_id=request;view.state=state;view.reason=reason;view.ip[0]=0;
     if(ssid)snprintf(view.ssid,sizeof view.ssid,"%s",ssid);
@@ -77,20 +80,17 @@ static bool load_credentials(cw_wifi_packet_t *p) {
     }
     p->op=1;return ok;
 }
-#if !CONFIG_CW_LAUNCHER_APP
 static esp_err_t save_credentials(const cw_wifi_packet_t *p) {
     nvs_handle_t h;esp_err_t rc=nvs_open("cw_wifi",NVS_READWRITE,&h);if(rc!=ESP_OK)return rc;
     rc=nvs_set_str(h,"ssid",p->ssid);if(rc==ESP_OK)rc=nvs_set_str(h,"pass",p->password);
     if(rc==ESP_OK)rc=nvs_commit(h);
     nvs_close(h);return rc;
 }
-#endif
 static esp_err_t erase_credentials(void) {
     nvs_handle_t h;esp_err_t rc=nvs_open("cw_wifi",NVS_READWRITE,&h);if(rc!=ESP_OK)return rc;
     rc=nvs_erase_all(h);if(rc==ESP_OK)rc=nvs_commit(h);
     nvs_close(h);return rc;
 }
-#if !CONFIG_CW_LAUNCHER_APP
 static bool connect_once(cw_wifi_packet_t *p) {
     wifi_config_t config={0};
     memcpy(config.sta.ssid,p->ssid,strlen(p->ssid));memcpy(config.sta.password,p->password,strlen(p->password));
@@ -161,56 +161,20 @@ static void wifi_event(void *arg,esp_event_base_t base,int32_t id,void *data) {
     configASSERT(xQueueSend(network_queue,&c,0)==pdTRUE);
 }
 #else /* CONFIG_CW_LAUNCHER_APP: the okou_agent SDK owns Wi-Fi (networks shared with esp-launcher) */
-/* One-time: the network this watch saved itself (cw_wifi) joins the shared list. cw_wifi is kept,
- * so a standalone build flashed back over USB still finds its network. */
-static void migrate_legacy_network(void) {
-    cw_wifi_packet_t p={0};nvs_handle_t h;uint8_t done=0;
-    if(!load_credentials(&p)) {mbedtls_platform_zeroize(&p,sizeof p);return;}
-    if(nvs_open("cw_wifi",NVS_READWRITE,&h)==ESP_OK) {
-        nvs_get_u8(h,"shared",&done);
-        if(!done&&okou_wifi_add(p.ssid,p.password,false)==ESP_OK) {
-            nvs_set_u8(h,"shared",1);nvs_commit(h);ESP_LOGI("wifi","saved network %s now shared with the launcher",p.ssid);
-        }
-        nvs_close(h);
-    }
-    mbedtls_platform_zeroize(&p,sizeof p);
-}
 static void station_ip(char *ip,size_t n) {
     esp_netif_t *nf=esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");esp_netif_ip_info_t info;
     if(nf&&esp_netif_get_ip_info(nf,&info)==ESP_OK&&info.ip.addr)snprintf(ip,n,IPSTR,IP2STR(&info.ip));else ip[0]=0;
 }
-static atomic_bool sntp_ready; /* set once dropbox_setup_init() has initialised SNTP */
 static void network_task(void *arg) {
-    migrate_legacy_network();
-    portENTER_CRITICAL(&lock);view.saved=okou_wifi_count()>0;portEXIT_CRITICAL(&lock);
-    bool was_up=false;bool first=true;bool sntp_started=false;char last_ssid[33]="";network_command_t c;
+    bool first=true,was_up=false;
+    char last_ssid[33]="";
     for(;;) {
-        if(xQueueReceive(network_queue,&c,pdMS_TO_TICKS(1000))==pdTRUE) {
-            if(c.op==1) { /* join from the Coffee Watch page: add to the shared list; the SDK connects */
-                esp_err_t rc=okou_wifi_add(c.packet.ssid,c.packet.password,false);
-                portENTER_CRITICAL(&lock);view.saved=okou_wifi_count()>0;portEXIT_CRITICAL(&lock);
-                char cur[33]="";bool up=okou_net_has_ip()&&okou_wifi_current(cur,sizeof cur);
-                /* while online elsewhere the working connection is kept; the new network is used whenever it is the best one in range */
-                request_state(c.packet.request_id,rc!=ESP_OK?CW_NET_FAILED:(up?CW_NET_CONNECTED:CW_NET_CONNECTING),rc,up?cur:c.packet.ssid);
-                if(up) {char ip[16];station_ip(ip,sizeof ip);network_state(CW_NET_CONNECTED,0,cur,ip);}
-            } else if(c.op==2) { /* forget: drop the network in use (or the most recent one) */
-                char cur[33]="";
-                if(!okou_wifi_current(cur,sizeof cur)) {cJSON *a=cJSON_CreateArray();okou_wifi_saved_json(a);cJSON *f=cJSON_GetArrayItem(a,0);if(f)snprintf(cur,sizeof cur,"%s",cJSON_GetObjectItem(f,"ssid")->valuestring);cJSON_Delete(a);}
-                if(cur[0])okou_wifi_forget(cur);
-                erase_credentials();
-                portENTER_CRITICAL(&lock);view.saved=okou_wifi_count()>0;portEXIT_CRITICAL(&lock);
-                request_state(c.packet.request_id,okou_wifi_count()?CW_NET_CONNECTING:CW_NET_UNCONFIGURED,0,"");
-            }
-            mbedtls_platform_zeroize(&c,sizeof c);
-        }
-        char ssid[33]="",ip[16]="";bool up=okou_net_has_ip()&&okou_wifi_current(ssid,sizeof ssid);
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        char ssid[33]="",ip[16]="";
+        bool up=okou_net_has_ip()&&okou_wifi_current(ssid,sizeof ssid);
+        bool saved=okou_wifi_count()>0;
+        portENTER_CRITICAL(&lock);view.saved=saved;portEXIT_CRITICAL(&lock);
         if(up)station_ip(ip,sizeof ip);
-        /* The standalone build sets the clock through its update check; this variant has none, and
-         * TLS (hub, Dropbox) verifies certificate dates, so start SNTP on the first IP. */
-        if(up&&!sntp_started&&atomic_load(&sntp_ready)) {
-            esp_err_t rc=esp_netif_sntp_start();sntp_started=rc==ESP_OK;
-            if(rc!=ESP_OK)ESP_LOGW("wifi","SNTP start failed: %s",esp_err_to_name(rc));
-        }
         if(first||up!=was_up||strcmp(ssid,last_ssid)) {
             first=false;
             network_state(up?CW_NET_CONNECTED:(okou_wifi_count()?CW_NET_CONNECTING:CW_NET_UNCONFIGURED),0,up?ssid:"",up?ip:NULL);
@@ -222,6 +186,7 @@ static void network_task(void *arg) {
 static void json_escape(char *out,const char *s) {
     while(*s) {unsigned char c=*s++;if(c=='"'||c=='\\') {*out++='\\';*out++=c;}else if(c<32) {sprintf(out,"\\u%04x",c);out+=6;}else *out++=c;}*out=0;
 }
+#if !CONFIG_CW_LAUNCHER_APP
 static int access_config(uint16_t conn,uint16_t attr,struct ble_gatt_access_ctxt *ctx,void *arg) {
     struct ble_gap_conn_desc desc;
     if(!snapshot().setup_active||conn!=browser||ble_gap_conn_find(conn,&desc)||!desc.sec_state.authenticated||!desc.sec_state.encrypted)return BLE_ATT_ERR_INSUFFICIENT_AUTHEN;
@@ -232,6 +197,7 @@ static int access_config(uint16_t conn,uint16_t attr,struct ble_gatt_access_ctxt
     c.op=c.packet.op;bool queued=xQueueSend(network_queue,&c,0)==pdTRUE;mbedtls_platform_zeroize(&c,sizeof c);
     return queued?0:BLE_ATT_ERR_INSUFFICIENT_RES;
 }
+#endif
 static int access_status(uint16_t conn,uint16_t attr,struct ble_gatt_access_ctxt *ctx,void *arg) {
     if(!snapshot().setup_active||conn!=browser)return BLE_ATT_ERR_INSUFFICIENT_AUTHEN;
     static const char *states[]={"unconfigured","connecting","connected","failed","disconnected"};
@@ -262,7 +228,9 @@ static int access_dropbox_status(uint16_t conn,uint16_t attr,struct ble_gatt_acc
 static int access_signal(uint16_t conn,uint16_t attr,struct ble_gatt_access_ctxt *ctx,void *arg) {return BLE_ATT_ERR_READ_NOT_PERMITTED;}
 static const struct ble_gatt_svc_def services[]={
     {.type=BLE_GATT_SVC_TYPE_PRIMARY,.uuid=&service_uuid.u,.characteristics=(struct ble_gatt_chr_def[]){
+#if !CONFIG_CW_LAUNCHER_APP
         {.uuid=&config_uuid.u,.access_cb=access_config,.flags=BLE_GATT_CHR_F_WRITE|BLE_GATT_CHR_F_WRITE_ENC|BLE_GATT_CHR_F_WRITE_AUTHEN},
+#endif
         {.uuid=&status_uuid.u,.access_cb=access_status,.flags=BLE_GATT_CHR_F_READ|BLE_GATT_CHR_F_READ_ENC|BLE_GATT_CHR_F_READ_AUTHEN},
         {.uuid=&signal_uuid.u,.access_cb=access_signal,.val_handle=&signal_handle,.flags=BLE_GATT_CHR_F_NOTIFY},
         {.uuid=&dropbox_config_uuid.u,.access_cb=access_dropbox_config,.flags=BLE_GATT_CHR_F_WRITE|BLE_GATT_CHR_F_WRITE_ENC|BLE_GATT_CHR_F_WRITE_AUTHEN},
@@ -344,13 +312,12 @@ void wifi_setup_register(void) {
     ble_hs_cfg.sm_io_cap=BLE_SM_IO_CAP_DISP_ONLY;ble_hs_cfg.sm_bonding=0;ble_hs_cfg.sm_mitm=1;ble_hs_cfg.sm_sc=1;ble_hs_cfg.sm_sc_only=1;
 }
 void wifi_setup_init(void) {
-    network_queue=xQueueCreate(8,sizeof(network_command_t));configASSERT(network_queue);
 #if CONFIG_CW_LAUNCHER_APP
     cw_launcher_net_start(); /* SDK: netif, Wi-Fi driver, shared networks, hub agent */
     configASSERT(xTaskCreate(network_task,"wifi-config",4096,NULL,4,NULL)==pdPASS);
     dropbox_setup_init();
-    atomic_store(&sntp_ready,true);
 #else
+    network_queue=xQueueCreate(8,sizeof(network_command_t));configASSERT(network_queue);
     ESP_ERROR_CHECK(esp_netif_init());ESP_ERROR_CHECK(esp_event_loop_create_default());
     station_interface=esp_netif_create_default_wifi_sta();configASSERT(station_interface);
     wifi_init_config_t config=WIFI_INIT_CONFIG_DEFAULT();ESP_ERROR_CHECK(esp_wifi_init(&config));

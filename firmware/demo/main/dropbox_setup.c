@@ -137,7 +137,13 @@ static bool text_field(cJSON *json,const char *key,char *out,size_t size) {
 }
 static bool clock_ready(void) {
     if(time(NULL)>1735689600)return true;
+#if CONFIG_CW_LAUNCHER_APP
+    // The Hub starts SNTP on the first IP. Wait for its clock without reinitializing it.
+    for (int i=0; i<30 && time(NULL)<=1735689600; ++i) vTaskDelay(pdMS_TO_TICKS(500));
+    return time(NULL)>1735689600;
+#else
     esp_netif_sntp_start();return esp_netif_sntp_sync_wait(pdMS_TO_TICKS(15000))==ESP_OK&&time(NULL)>1735689600;
+#endif
 }
 static int http(const char *url,const char *body,size_t length,const char *type,bool authorized,const char *api_arg) {
     mbedtls_platform_zeroize(response,sizeof response);
@@ -511,7 +517,9 @@ void dropbox_setup_init(void) {
     admission=xSemaphoreCreateMutex();configASSERT(admission);
     commands=xQueueCreate(8,sizeof(queued_command_t));configASSERT(commands);
     reserve_work(); // Prevent maintenance from overlapping worker initialization.
+#if !CONFIG_CW_LAUNCHER_APP
     esp_sntp_config_t config=ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");config.start=false;ESP_ERROR_CHECK(esp_netif_sntp_init(&config));
+#endif
     configASSERT(xTaskCreate(dropbox_task,"dropbox",12288,NULL,3,NULL)==pdPASS);
     atomic_store(&admission_ready,true);
 }
