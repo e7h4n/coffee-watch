@@ -57,7 +57,11 @@ static void firmware_sync(int64_t now,bool force=false) {
     if(status.state!=old.state||status.busy!=old.busy||status.received_bytes!=old.received_bytes||status.total_bytes!=old.total_bytes||
        strcmp(status.version,old.version)||strcmp(status.message,old.message))render_needed=true;
     old=status;
+#if CONFIG_CW_LAUNCHER_APP
+    bool enabled=false;
+#else
     bool enabled=!firmware_close_when_idle;
+#endif
     if(enabled!=ui.firmware_primary_enabled) {ui.firmware_primary_enabled=enabled;render_needed=true;}
     if(status.busy&&cw_update_must_cancel_for_power(ui.battery_percent)) {
         firmware_update_cancel();firmware_notice("Battery low; stopping update");
@@ -89,7 +93,10 @@ static void firmware_open() {
     if(!cw_update_idle_allowed(app.mode==CW_APP_HOME,flow.stage==CW_HOME||flow.stage==CW_BREWER,flow.interrupted,ui.wifi_setup))return;
     ui.firmware_open=true;ui.held=0;firmware_close_when_idle=false;
     snprintf(ui.firmware_current,sizeof ui.firmware_current,"%s",esp_app_get_description()->version);
-    firmware_request(false);render_needed=true;
+#if !CONFIG_CW_LAUNCHER_APP
+    firmware_request(false);
+#endif
+    render_needed=true;
 }
 static void firmware_action(int which) {
     if(which==UI_FIRMWARE_BACK) {firmware_close();return;}
@@ -368,7 +375,7 @@ extern "C" void app_main() {
     snprintf(session,sizeof session,"%02x%02x%02x%02x%02x%02x-%08lx%08lx",mac[0],mac[1],mac[2],mac[3],mac[4],mac[5],(unsigned long)esp_random(),(unsigned long)esp_random());cw_record_init(&records,session);color_mode_init(session);
     wifi_setup_init();ESP_ERROR_CHECK(firmware_update_init());transport_init();cw_launcher_app_start();xTaskCreate(console_task,"console",4096,nullptr,2,nullptr);
     const int64_t health_started=now_us();bool boot_health_checked=false;
-    ESP_LOGI("demo","coffee-watch-demo-v3; UI=%dx%d",(int)board_canvas().width(),(int)board_canvas().height());
+    ESP_LOGI("demo","coffee-watch-demo-v3; battery=%d; UI=%dx%d",ui.battery_percent,(int)board_canvas().width(),(int)board_canvas().height());
     int64_t last_draw=0,last_activity=now_us(),last_battery=last_activity;
     int battery_percent=ui.battery_percent;
     constexpr int64_t idle_limit_us=10LL*60*1000000;
@@ -425,7 +432,10 @@ extern "C" void app_main() {
         if(now-last_battery>=1000000) {
             last_battery=now;battery_percent=board_battery_percent();
         }
-        if(ui.battery_percent!=battery_percent) {ui.battery_percent=battery_percent;render_needed=true;}
+        if(ui.battery_percent!=battery_percent) {
+            ESP_LOGI("battery","level=%d",battery_percent);
+            ui.battery_percent=battery_percent;render_needed=true;
+        }
         firmware_sync(now);
         if(!boot_health_checked&&now-health_started>=10000000) {
             boot_health_checked=true;

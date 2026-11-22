@@ -146,7 +146,7 @@ jobs:
           test "$actual" = "$COMMIT"
           gh release create "$VERSION" --repo "$GH_REPO" --target "$COMMIT" --verify-tag \
             --title "Coffee Watch $VERSION" --draft --latest=false \
-            --notes 'ESP32-S3 / 16MiB / partition schema 2. OTA uses ONLY the app .bin and latest.json. The separate USB migration ZIP is NOT an OTA image. Read spec/firmware-update.md before first USB migration. TLS + hashes, no publisher signature or eFuse changes.' \
+            --notes 'ESP Hub StopWatch: use the native image URL in esphub.json. Standalone schema 2: use latest.json and its matching binary. The separate USB migration ZIP is NOT an OTA image. Read spec/firmware-update.md before first USB migration. TLS + hashes, no publisher signature or eFuse changes.' \
             ./*.bin ./latest.json ./SHA256SUMS ./*-usb-migration.zip ../dist-launcher/*.bin ../dist-launcher/esphub.json
           release_id=$(gh release view "$VERSION" --json databaseId --jq '.databaseId')
           # Publish only after every asset was uploaded. GitHub computes latest
