@@ -18,6 +18,9 @@
 #include "esp_image_format.h"
 #include "esp_app_format.h"
 #include "esp_system.h"
+#if CONFIG_CW_LAUNCHER_APP
+#include "okou_agent.h"
+#endif
 #include "esp_timer.h"
 #include "esp_log.h"
 #include "mbedtls/sha256.h"
@@ -415,10 +418,7 @@ esp_err_t firmware_update_mark_running_valid_after_health(bool ui, bool nvs)
     /* No updater worker in the launcher variant; the same local health gate (rendered UI, NVS,
      * ten seconds of main-loop heartbeats) marks the launcher-installed image valid. */
     if (!ui || !nvs) return ESP_ERR_INVALID_STATE;
-    esp_ota_img_states_t st;
-    esp_err_t e = esp_ota_get_state_partition(esp_ota_get_running_partition(), &st);
-    if (e == ESP_OK && st == ESP_OTA_IMG_PENDING_VERIFY) e = esp_ota_mark_app_valid_cancel_rollback();
-    return e;
+    return okou_app_mark_valid(); /* also reports app.valid to the hub */
 #endif
     if (!ui || !nvs || !s_worker) return ESP_ERR_INVALID_STATE;
     LOCK();
