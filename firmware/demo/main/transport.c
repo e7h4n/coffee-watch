@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MIT
+#include "sdkconfig.h"
 #include "demo.h"
 #if CONFIG_CW_LAUNCHER_APP
 #include "okou_ble.h"
