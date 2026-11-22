@@ -23,8 +23,8 @@ CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y
 # More internal heap headroom for hub reconnects (v0.1.11 ran with a 7.7 KB largest block against
 # the ~5.5 KB the websocket task needs): non-ISR FreeRTOS functions run from flash (up to 8 KB).
 CONFIG_FREERTOS_PLACE_FUNCTIONS_INTO_FLASH=y
-# Offline recovery: a running app boots straight back into itself, so hold the select button
-# (GPIO1) for 3 s while the watch starts to open the launcher's BLE provisioning (new Wi-Fi,
-# new device token from hub.c3p0.dev/setup).
-CONFIG_OKOU_SETUP_BUTTON_GPIO=1
-CONFIG_OKOU_SETUP_BUTTON_HOLD_MS=3000
+# Recovery: a running app boots straight back into itself. Hold the select button (GPIO1) for
+# 3 s while the watch starts to boot into the esp-launcher and stay there (BLE provisioning open,
+# hub installs possible); "启动应用" on hub.c3p0.dev or the next power cycle returns to the app.
+CONFIG_OKOU_LAUNCHER_BUTTON_GPIO=1
+CONFIG_OKOU_LAUNCHER_BUTTON_HOLD_MS=3000
