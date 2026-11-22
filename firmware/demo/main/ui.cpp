@@ -9,6 +9,11 @@
 #include <cstdio>
 #include <cstdarg>
 #include <cstring>
+#if CONFIG_CW_LAUNCHER_APP
+static constexpr const char *SETUP_LABEL="Dropbox setup";
+#else
+static constexpr const char *SETUP_LABEL="Wi-Fi setup";
+#endif
 static constexpr uint32_t BG=design::background,FG=design::foreground,MUTED=design::muted,ACCENT=design::accent,LINE=design::line,BUTTON=design::button;
 static uint32_t mix(uint32_t a,uint32_t b,unsigned alpha);
 static float enter=1.f,value_flash=0.f,breath=0.f;
@@ -265,6 +270,10 @@ void ui_draw(const cw_flow_t &s,const UiState &u) {
         text("Firmware",234,131,40);
         char current[48];snprintf(current,sizeof current,"Installed %s",u.firmware_current);
         text(current,234,177,20,MUTED,330);
+#if CONFIG_CW_LAUNCHER_APP
+        text("Updates via ESP Hub",234,250,30,ACCENT);
+        return;
+#endif
         text(v.version[0]?v.version:"Coffee Watch",234,222,34,v.version[0]?ACCENT:FG,330);
         const char *status="Choose Check update";
         switch(v.state) {
@@ -293,7 +302,7 @@ void ui_draw(const cw_flow_t &s,const UiState &u) {
         text(label,234,438,u.record.state==CW_RECORD_FAILED?12:16,u.record.state==CW_RECORD_SAVED?ACCENT:MUTED);
     }
     if(u.wifi_setup) {
-        text("Wi-Fi setup",234,116,40);
+        text(SETUP_LABEL,234,116,40);
         if(u.network.setup_active) {
             text(u.network.paired?"Browser paired":"Pairing code",234,174,22,MUTED);
             fmt(234,229,90,FG,"%06u",u.network.passkey);
@@ -328,7 +337,7 @@ void ui_draw(const cw_flow_t &s,const UiState &u) {
             text(t.enabled?t.on:t.off,234,t.top+56,18,held?BG:MUTED);
         }
         if(s.error[0]&&!u.home_scale)text(s.error,234,338,16,MUTED);
-        bottom("Wi-Fi setup",true,u.held==UI_HOME_WIFI);return;
+        bottom(SETUP_LABEL,true,u.held==UI_HOME_WIFI);return;
     }
     if(s.interrupted) {
         text("Brew interrupted",234,174,36);text(s.error[0]?s.error:"Scale disconnected",234,224,20,MUTED);
@@ -336,12 +345,12 @@ void ui_draw(const cw_flow_t &s,const UiState &u) {
     }
     if(!s.scale_ready&&s.stage!=CW_REPORT&&s.stage!=CW_TDS) {
         // The second scale alone cannot brew: the stored dose comes from BOOKOO.
-        if(s.aux_ready) {text("Connect BOOKOO",design::center_x,design::center_y,design::type::status,FG,0,true);text("Dose comes from BOOKOO",234,290,18,MUTED);bottom("Wi-Fi setup",true,u.held==1);return;}
-        text("Connect scale",design::center_x,design::center_y,design::type::status,FG,0,true);bottom("Wi-Fi setup",true,u.held==1);if(s.error[0])text(s.error,234,290,18,MUTED);return;
+        if(s.aux_ready) {text("Connect BOOKOO",design::center_x,design::center_y,design::type::status,FG,0,true);text("Dose comes from BOOKOO",234,290,18,MUTED);bottom(SETUP_LABEL,true,u.held==1);return;}
+        text("Connect scale",design::center_x,design::center_y,design::type::status,FG,0,true);bottom(SETUP_LABEL,true,u.held==1);if(s.error[0])text(s.error,234,290,18,MUTED);return;
     }
     char b[64];
     switch(s.stage) {
-    case CW_HOME:text("Connect scale",design::center_x,design::center_y,design::type::status,FG,0,true);bottom("Wi-Fi setup",true,u.held==1);break;
+    case CW_HOME:text("Connect scale",design::center_x,design::center_y,design::type::status,FG,0,true);bottom(SETUP_LABEL,true,u.held==1);break;
     case CW_BREWER:
         if(u.carousel_dir) {
             for(int k=-2;k<=2;k++) {

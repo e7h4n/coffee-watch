@@ -88,8 +88,9 @@ jobs:
           mkdir -p ../../dist-launcher
           cp build-launcher/coffee_watch_demo.bin "../../dist-launcher/coffee-watch-launcher-app-$RELEASE_VERSION-esp32s3.bin"
           cp build-launcher/coffee_watch_demo.elf "../../dist-launcher/coffee-watch-launcher-app-$RELEASE_VERSION-esp32s3.elf"
+          python3 ../../tools/package_esphub.py "../../dist-launcher/coffee-watch-launcher-app-$RELEASE_VERSION-esp32s3.bin" "$RELEASE_VERSION" "$GITHUB_REPOSITORY"
           (cd ../../dist-launcher && sha256sum * > SHA256SUMS)
-      - name: Upload esp-launcher app variant (unsigned; signed by esp-launcher CI)
+      - name: Upload ESP Hub native application
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: coffee-watch-launcher-app-v0.1.${{ github.run_number }}
@@ -119,6 +120,12 @@ jobs:
         with:
           name: coffee-watch-v0.1.${{ github.run_number }}
           path: dist
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: coffee-watch-launcher-app-v0.1.${{ github.run_number }}
+          path: dist-launcher
+      - name: Verify native StopWatch artifacts
+        run: cd dist-launcher && sha256sum -c SHA256SUMS
       - name: Publish immutable run-number release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -139,8 +146,8 @@ jobs:
           test "$actual" = "$COMMIT"
           gh release create "$VERSION" --repo "$GH_REPO" --target "$COMMIT" --verify-tag \
             --title "Coffee Watch $VERSION" --draft --latest=false \
-            --notes 'ESP32-S3 / 16MiB / partition schema 2. OTA uses ONLY the app .bin and latest.json. The separate USB migration ZIP is NOT an OTA image. Read spec/firmware-update.md before first USB migration. TLS + hashes, no publisher signature or eFuse changes.' \
-            ./*.bin ./latest.json ./SHA256SUMS ./*-usb-migration.zip
+            --notes 'ESP Hub StopWatch: use the native image URL in esphub.json. Standalone schema 2: use latest.json and its matching binary. The separate USB migration ZIP is NOT an OTA image. Read spec/firmware-update.md before first USB migration. TLS + hashes, no publisher signature or eFuse changes.' \
+            ./*.bin ./latest.json ./SHA256SUMS ./*-usb-migration.zip ../dist-launcher/*.bin ../dist-launcher/esphub.json
           release_id=$(gh release view "$VERSION" --json databaseId --jq '.databaseId')
           # Publish only after every asset was uploaded. GitHub computes latest
           # server-side using semantic versions, not a racing client-side pointer.

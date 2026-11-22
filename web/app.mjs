@@ -29,8 +29,11 @@ watch.addEventListener('disconnected', () => {
 watch.addEventListener('progress', e => {$('device-name').textContent = e.detail;badge.textContent = 'Connecting';});
 watch.addEventListener('error', e => error(e.detail.message));
 watch.addEventListener('status', e => {
-  const v = e.detail;busy = v.state === 'connecting';wifiConnected = v.state === 'connected';controls();$('forget').hidden = !v.saved;
-  if (v.state === 'connected') {
+  const v = e.detail;busy = v.state === 'connecting';wifiConnected = v.state === 'connected';controls();$('forget').hidden = !watch.config || !v.saved;
+  $('network-form').hidden = !watch.config;
+  if (!watch.config && !wifiConnected) {
+    status('Wi-Fi managed by ESP Hub', 'Connect the watch through ESP Hub before configuring Dropbox.');
+  } else if (v.state === 'connected') {
     status('Wi-Fi connected', `${v.ssid} · ${v.ip}${v.saved ? ' · Saved on watch' : ' · Not saved; device storage error'}`, v.saved ? 'success' : 'problem');
   } else if (v.state === 'connecting') status('Connecting to Wi-Fi', `The watch is joining ${v.ssid}. Waiting for its IP address.`);
   else if (v.state === 'failed' || v.state === 'disconnected') {

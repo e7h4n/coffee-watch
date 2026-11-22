@@ -23,3 +23,10 @@ CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y
 # More internal heap headroom for hub reconnects (v0.1.11 ran with a 7.7 KB largest block against
 # the ~5.5 KB the websocket task needs): non-ISR FreeRTOS functions run from flash (up to 8 KB).
 CONFIG_FREERTOS_PLACE_FUNCTIONS_INTO_FLASH=y
+
+# ESP Hub's binary application slot is named micropython for native apps as well.
+CONFIG_OKOU_BOARD_PROFILE="stopwatch"
+CONFIG_OKOU_MICROPYTHON_RUNTIME=y
+CONFIG_OKOU_LAUNCHER_BUTTON_GPIO=1
+CONFIG_OKOU_LOG_BUF_SIZE=4096
+CONFIG_OKOU_TX_FRAME_MAX=4096

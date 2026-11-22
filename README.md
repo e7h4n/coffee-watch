@@ -6,6 +6,12 @@ Coffee Watch connects an M5Stack StopWatch, a Bluetooth coffee scale, and a
 refractometer. A defined brewing workflow brings measurements from these devices
 together to calculate and present your brew data with minimal manual recording.
 
+## ESP Hub StopWatch
+
+For a registered StopWatch running the ESP Hub launcher and fresh 4 MiB app layout, use the `esphub.json` asset in the Coffee Watch release. Check its board, version and SHA-256. Enter launcher mode and install its native binary URL with `ota.install` and kind `micropython` (the Hub application slot). Verify that the next app boot reports `coffee_watch_demo`, the release version and a valid application after its local display/NVS health check. [Coffee Watch releases](https://github.com/e7h4n/coffee-watch/releases)
+
+ESP Hub manages Wi-Fi and OTA on this build. Hold Select for three seconds during application startup to return to the launcher. For Dropbox authorization, open **Dropbox setup** on the watch and pair with the [Bluetooth setup page](https://e7h4n.github.io/coffee-watch/). Battery percentage uses the M5PM1 voltage and the same conversion as M5Unified’s StopWatch power API. [Official battery example](https://docs.m5stack.com/en/arduino/stopwatch/battery)
+
 ## Home
 
 The watch starts on Home: **Connect scale or color sensor**, a Brew and a Roast
@@ -112,7 +118,7 @@ uploaded to Dropbox over the saved Wi-Fi as that group's JSON record. The index 
 open-source Roast Meter's sensor settings and formula; it ranks your own roasts
 and is not an Agtron value. See [Roast color mode](spec/colorimeter.md).
 
-## Wi-Fi setup
+## Standalone Wi-Fi setup
 
 On Home, tap **Wi-Fi setup**, then open the
 [Chrome setup page](https://e7h4n.github.io/coffee-watch/). Connect over Web
@@ -120,7 +126,7 @@ Bluetooth, enter the pairing code shown on the watch if requested, and submit
 your 2.4 GHz network details. Credentials go directly to the watch; the static
 page does not upload or save them. See the [Wi-Fi interface guide](spec/wifi.md).
 
-## Firmware updates
+## Standalone firmware updates
 
 The 16 MiB watch now targets two 4 MiB application slots, with **7.93 MiB reserved
 for future local data**. No SD card or image-sized RAM buffer is needed. From

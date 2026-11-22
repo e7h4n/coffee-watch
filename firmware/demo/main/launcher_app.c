@@ -9,6 +9,7 @@
 #include <string.h>
 #include "esp_log.h"
 #include "okou_agent.h"
+#include "okou_agent_ext.h"
 
 static const char *TAG = "launcher_app";
 
@@ -36,6 +37,20 @@ static int cmd_console(int argc, char **argv, okou_out_t *out)
     return 0;
 }
 
+static esp_err_t terminal_line(const cJSON *args, cJSON *data, char *error, size_t size)
+{
+    const char *text = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "data"));
+    size_t length = text ? strcspn(text, "\r\n") : 0;
+    if (!length || length >= 80 || text[length + strspn(text + length, "\r\n")]) {
+        snprintf(error, size, "Expected one console command of at most 79 bytes");
+        return ESP_ERR_INVALID_ARG;
+    }
+    char line[80];
+    memcpy(line, text, length);
+    line[length] = 0;
+    return cw_console_enqueue(line) ? ESP_OK : ESP_ERR_NO_MEM;
+}
+
 static bool s_started;
 
 void cw_launcher_net_start(void)
@@ -54,6 +69,7 @@ void cw_launcher_net_start(void)
 void cw_launcher_app_start(void)
 {
     if (s_started) {
+        ESP_ERROR_CHECK(okou_op_register("term.write", terminal_line));
         okou_cmd_register("console", "run a coffee-watch serial console command", cmd_console);
     }
 }

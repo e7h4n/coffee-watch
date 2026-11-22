@@ -205,11 +205,10 @@ void board_shutdown() {
 }
 
 int board_battery_percent() {
-    static uint16_t filtered_mv=0;
     uint16_t mv=0;
-    if(pmic.readVbat(&mv)!=M5PM1_OK)return -1;
-    filtered_mv=filtered_mv?(filtered_mv*7u+mv+4u)/8u:mv;
-    if(filtered_mv<=3300)return 0;
-    if(filtered_mv>=4200)return 100;
-    return (filtered_mv-3300)*100u/900u;
+    if(pmic.readVbat(&mv)!=M5PM1_OK||mv==0)return -1;
+    // M5Unified Power_Class::getBatteryLevel, ESP32-S3 / M5PM1 path.
+    // The official 800 mV span gives 0% at 3300 mV and 100% at 4100 mV.
+    int level=(static_cast<int>(mv)-3300)*100/800;
+    return level<0?0:level>100?100:level;
 }
