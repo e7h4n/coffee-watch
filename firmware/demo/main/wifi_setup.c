@@ -3,6 +3,12 @@
 #include "wifi_packet.h"
 #include "dropbox_setup.h"
 #include "demo.h"
+#include "launcher_app.h"
+#include "sdkconfig.h"
+#if CONFIG_CW_LAUNCHER_APP
+#include "okou_agent_ext.h"
+#include "esp_netif_sntp.h"
+#endif
 #include <stdio.h>
 #include <string.h>
 #include <stdatomic.h>
@@ -31,7 +37,9 @@ static uint8_t own_type;
 static uint16_t browser=BLE_HS_CONN_HANDLE_NONE,signal_handle;
 static struct ble_npl_event control_event,notify_event;
 static QueueHandle_t network_queue;
+#if !CONFIG_CW_LAUNCHER_APP
 static esp_netif_t *station_interface;
+#endif
 static char status_json[384];
 static int status_length;
 static char dropbox_json[512];static int dropbox_length;
@@ -69,17 +77,20 @@ static bool load_credentials(cw_wifi_packet_t *p) {
     }
     p->op=1;return ok;
 }
+#if !CONFIG_CW_LAUNCHER_APP
 static esp_err_t save_credentials(const cw_wifi_packet_t *p) {
     nvs_handle_t h;esp_err_t rc=nvs_open("cw_wifi",NVS_READWRITE,&h);if(rc!=ESP_OK)return rc;
     rc=nvs_set_str(h,"ssid",p->ssid);if(rc==ESP_OK)rc=nvs_set_str(h,"pass",p->password);
     if(rc==ESP_OK)rc=nvs_commit(h);
     nvs_close(h);return rc;
 }
+#endif
 static esp_err_t erase_credentials(void) {
     nvs_handle_t h;esp_err_t rc=nvs_open("cw_wifi",NVS_READWRITE,&h);if(rc!=ESP_OK)return rc;
     rc=nvs_erase_all(h);if(rc==ESP_OK)rc=nvs_commit(h);
     nvs_close(h);return rc;
 }
+#if !CONFIG_CW_LAUNCHER_APP
 static bool connect_once(cw_wifi_packet_t *p) {
     wifi_config_t config={0};
     memcpy(config.sta.ssid,p->ssid,strlen(p->ssid));memcpy(config.sta.password,p->password,strlen(p->password));
@@ -149,6 +160,65 @@ static void wifi_event(void *arg,esp_event_base_t base,int32_t id,void *data) {
     else return;
     configASSERT(xQueueSend(network_queue,&c,0)==pdTRUE);
 }
+#else /* CONFIG_CW_LAUNCHER_APP: the okou_agent SDK owns Wi-Fi (networks shared with esp-launcher) */
+/* One-time: the network this watch saved itself (cw_wifi) joins the shared list. cw_wifi is kept,
+ * so a standalone build flashed back over USB still finds its network. */
+static void migrate_legacy_network(void) {
+    cw_wifi_packet_t p={0};nvs_handle_t h;uint8_t done=0;
+    if(!load_credentials(&p)) {mbedtls_platform_zeroize(&p,sizeof p);return;}
+    if(nvs_open("cw_wifi",NVS_READWRITE,&h)==ESP_OK) {
+        nvs_get_u8(h,"shared",&done);
+        if(!done&&okou_wifi_add(p.ssid,p.password,false)==ESP_OK) {
+            nvs_set_u8(h,"shared",1);nvs_commit(h);ESP_LOGI("wifi","saved network %s now shared with the launcher",p.ssid);
+        }
+        nvs_close(h);
+    }
+    mbedtls_platform_zeroize(&p,sizeof p);
+}
+static void station_ip(char *ip,size_t n) {
+    esp_netif_t *nf=esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");esp_netif_ip_info_t info;
+    if(nf&&esp_netif_get_ip_info(nf,&info)==ESP_OK&&info.ip.addr)snprintf(ip,n,IPSTR,IP2STR(&info.ip));else ip[0]=0;
+}
+static atomic_bool sntp_ready; /* set once dropbox_setup_init() has initialised SNTP */
+static void network_task(void *arg) {
+    migrate_legacy_network();
+    portENTER_CRITICAL(&lock);view.saved=okou_wifi_count()>0;portEXIT_CRITICAL(&lock);
+    bool was_up=false;bool first=true;bool sntp_started=false;char last_ssid[33]="";network_command_t c;
+    for(;;) {
+        if(xQueueReceive(network_queue,&c,pdMS_TO_TICKS(1000))==pdTRUE) {
+            if(c.op==1) { /* join from the Coffee Watch page: add to the shared list; the SDK connects */
+                esp_err_t rc=okou_wifi_add(c.packet.ssid,c.packet.password,false);
+                portENTER_CRITICAL(&lock);view.saved=okou_wifi_count()>0;portEXIT_CRITICAL(&lock);
+                char cur[33]="";bool up=okou_net_has_ip()&&okou_wifi_current(cur,sizeof cur);
+                /* while online elsewhere the working connection is kept; the new network is used whenever it is the best one in range */
+                request_state(c.packet.request_id,rc!=ESP_OK?CW_NET_FAILED:(up?CW_NET_CONNECTED:CW_NET_CONNECTING),rc,up?cur:c.packet.ssid);
+                if(up) {char ip[16];station_ip(ip,sizeof ip);network_state(CW_NET_CONNECTED,0,cur,ip);}
+            } else if(c.op==2) { /* forget: drop the network in use (or the most recent one) */
+                char cur[33]="";
+                if(!okou_wifi_current(cur,sizeof cur)) {cJSON *a=cJSON_CreateArray();okou_wifi_saved_json(a);cJSON *f=cJSON_GetArrayItem(a,0);if(f)snprintf(cur,sizeof cur,"%s",cJSON_GetObjectItem(f,"ssid")->valuestring);cJSON_Delete(a);}
+                if(cur[0])okou_wifi_forget(cur);
+                erase_credentials();
+                portENTER_CRITICAL(&lock);view.saved=okou_wifi_count()>0;portEXIT_CRITICAL(&lock);
+                request_state(c.packet.request_id,okou_wifi_count()?CW_NET_CONNECTING:CW_NET_UNCONFIGURED,0,"");
+            }
+            mbedtls_platform_zeroize(&c,sizeof c);
+        }
+        char ssid[33]="",ip[16]="";bool up=okou_net_has_ip()&&okou_wifi_current(ssid,sizeof ssid);
+        if(up)station_ip(ip,sizeof ip);
+        /* The standalone build sets the clock through its update check; this variant has none, and
+         * TLS (hub, Dropbox) verifies certificate dates, so start SNTP on the first IP. */
+        if(up&&!sntp_started&&atomic_load(&sntp_ready)) {
+            esp_err_t rc=esp_netif_sntp_start();sntp_started=rc==ESP_OK;
+            if(rc!=ESP_OK)ESP_LOGW("wifi","SNTP start failed: %s",esp_err_to_name(rc));
+        }
+        if(first||up!=was_up||strcmp(ssid,last_ssid)) {
+            first=false;
+            network_state(up?CW_NET_CONNECTED:(okou_wifi_count()?CW_NET_CONNECTING:CW_NET_UNCONFIGURED),0,up?ssid:"",up?ip:NULL);
+            was_up=up;snprintf(last_ssid,sizeof last_ssid,"%s",ssid);
+        }
+    }
+}
+#endif
 static void json_escape(char *out,const char *s) {
     while(*s) {unsigned char c=*s++;if(c=='"'||c=='\\') {*out++='\\';*out++=c;}else if(c<32) {sprintf(out,"\\u%04x",c);out+=6;}else *out++=c;}*out=0;
 }
@@ -275,6 +345,12 @@ void wifi_setup_register(void) {
 }
 void wifi_setup_init(void) {
     network_queue=xQueueCreate(8,sizeof(network_command_t));configASSERT(network_queue);
+#if CONFIG_CW_LAUNCHER_APP
+    cw_launcher_net_start(); /* SDK: netif, Wi-Fi driver, shared networks, hub agent */
+    configASSERT(xTaskCreate(network_task,"wifi-config",4096,NULL,4,NULL)==pdPASS);
+    dropbox_setup_init();
+    atomic_store(&sntp_ready,true);
+#else
     ESP_ERROR_CHECK(esp_netif_init());ESP_ERROR_CHECK(esp_event_loop_create_default());
     station_interface=esp_netif_create_default_wifi_sta();configASSERT(station_interface);
     wifi_init_config_t config=WIFI_INIT_CONFIG_DEFAULT();ESP_ERROR_CHECK(esp_wifi_init(&config));
@@ -284,4 +360,5 @@ void wifi_setup_init(void) {
     configASSERT(xTaskCreate(network_task,"wifi-config",4096,NULL,4,NULL)==pdPASS);
     dropbox_setup_init();
     ESP_ERROR_CHECK(esp_wifi_start());
+#endif
 }

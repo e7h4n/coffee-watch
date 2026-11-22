@@ -1,2 +1,8 @@
 dependencies:
   espressif/esp_codec_dev: "1.5.4"
+  # esp-launcher SDK (remote logs/commands/updates through hub.c3p0.dev). Linked always,
+  # started only in the launcher-app variant (CONFIG_CW_LAUNCHER_APP).
+  okou_agent:
+    git: https://github.com/e7h4n/esp-launcher.git
+    path: firmware/components/okou_agent
+    version: 1eb174864a6efcc89b0cf35f6eba2abbef889dfc

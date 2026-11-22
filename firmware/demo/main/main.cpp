@@ -7,6 +7,7 @@
 #include "color_mode.h"
 #include "color_sensor.h"
 #include "app_mode.h"
+#include "launcher_app.h"
 #include "firmware_update.h"
 #include "update_policy.h"
 #include "esp_app_desc.h"
@@ -342,6 +343,11 @@ static void receive(const demo_event_t &e) {
     render_needed=true;
 }
 struct ConsoleCommand {char line[80];};
+extern "C" bool cw_console_enqueue(const char *line) {
+    if(!console_commands)return false;
+    ConsoleCommand c;snprintf(c.line,sizeof c.line,"%s",line);
+    return xQueueSend(console_commands,&c,0)==pdTRUE;
+}
 static void console_task(void *arg) {
     char line[80];unsigned n=0;
     for(;;) {
@@ -360,7 +366,7 @@ extern "C" void app_main() {
     probe_trace_init();ui.home=true;ui.battery_percent=board_battery_percent();ui_tick(flow,ui,now_us());ui_draw(flow,ui);board_present();
     uint8_t mac[6];esp_read_mac(mac,ESP_MAC_WIFI_STA);char session[40];
     snprintf(session,sizeof session,"%02x%02x%02x%02x%02x%02x-%08lx%08lx",mac[0],mac[1],mac[2],mac[3],mac[4],mac[5],(unsigned long)esp_random(),(unsigned long)esp_random());cw_record_init(&records,session);color_mode_init(session);
-    wifi_setup_init();ESP_ERROR_CHECK(firmware_update_init());transport_init();xTaskCreate(console_task,"console",4096,nullptr,2,nullptr);
+    wifi_setup_init();ESP_ERROR_CHECK(firmware_update_init());transport_init();cw_launcher_app_start();xTaskCreate(console_task,"console",4096,nullptr,2,nullptr);
     const int64_t health_started=now_us();bool boot_health_checked=false;
     ESP_LOGI("demo","coffee-watch-demo-v3; UI=%dx%d",(int)board_canvas().width(),(int)board_canvas().height());
     int64_t last_draw=0,last_activity=now_us(),last_battery=last_activity;
