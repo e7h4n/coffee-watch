@@ -126,7 +126,7 @@ Bluetooth, enter the pairing code shown on the watch if requested, and submit
 your 2.4 GHz network details. Credentials go directly to the watch; the static
 page does not upload or save them. See the [Wi-Fi interface guide](spec/wifi.md).
 
-## Firmware updates
+## Standalone firmware updates
 
 The 16 MiB watch now targets two 4 MiB application slots, with **7.93 MiB reserved
 for future local data**. No SD card or image-sized RAM buffer is needed. From

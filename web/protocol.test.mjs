@@ -27,13 +27,13 @@ class Characteristic extends EventTarget {
   async startNotifications() {this.notifications = true;return this;}
   signal() {this.value = new DataView(Uint8Array.of(1).buffer);this.dispatchEvent(new Event('characteristicvaluechanged'));}
 }
-function fakeDevice() {
+function fakeDevice({hubManaged = false} = {}) {
   const characteristic = new Characteristic(), signal = new Characteristic(), device = new EventTarget();device.name = 'CoffeeWatch-test';
   const config = {async writeValueWithResponse(p) {this.last = new Uint8Array(p);}};
   const dropboxConfig = {async writeValueWithResponse(p) {this.last = new Uint8Array(p);}};
   const dropboxStatus = new Characteristic();dropboxStatus.value = dropboxValue();
   device.gatt = {connected: false, async connect() {this.connected = true;return this;},
-    async getPrimaryService(uuid) {assert.equal(uuid, SERVICE);return {async getCharacteristic(id) {assert.ok([CONFIG, STATUS, SIGNAL, DROPBOX_CONFIG, DROPBOX_STATUS].includes(id));return id === CONFIG ? config : id === STATUS ? characteristic : id === DROPBOX_CONFIG ? dropboxConfig : id === DROPBOX_STATUS ? dropboxStatus : signal;}};},
+    async getPrimaryService(uuid) {assert.equal(uuid, SERVICE);return {async getCharacteristic(id) {if (hubManaged && id === CONFIG) throw new DOMException("Absent", "NotFoundError");assert.ok([CONFIG, STATUS, SIGNAL, DROPBOX_CONFIG, DROPBOX_STATUS].includes(id));return id === CONFIG ? config : id === STATUS ? characteristic : id === DROPBOX_CONFIG ? dropboxConfig : id === DROPBOX_STATUS ? dropboxStatus : signal;}};},
     disconnect() {this.connected = false;device.dispatchEvent(new Event('gattserverdisconnected'));}};
   return {device, characteristic, signal, config, dropboxConfig, dropboxStatus};
 }
@@ -52,6 +52,15 @@ test('reads do not create a notification/read loop; writes need fresh matching s
   assert.equal(received.at(-1).state, 'connected');assert.equal(characteristic.reads, 6);
   assert.equal(link.pendingRequest, 0);
   link.disconnect();assert.equal(link.device, null);
+});
+test('Hub-managed watches pair for Dropbox without a Wi-Fi write characteristic', async () => {
+  const {device, dropboxConfig} = fakeDevice({hubManaged: true});
+  const watch = new WatchConnection({requestDevice: async () => device});
+  await watch.connect();
+  await assert.rejects(watch.write(joinPacket('Cafe', '', 1)));
+  await watch.writeDropbox(dropboxPacket(3, '', '', '', 2));
+  assert.ok(dropboxConfig.last);
+  watch.disconnect();
 });
 test('disconnection invalidates pending operations without a retry', async () => {
   const {device} = fakeDevice();const link = new WatchConnection({requestDevice: async () => device});

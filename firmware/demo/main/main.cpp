@@ -22,6 +22,7 @@
 #include "esp_mac.h"
 #include "esp_random.h"
 #include <cstdio>
+#include <cstdarg>
 #include <cstring>
 #include <cmath>
 #include <sys/time.h>
@@ -349,6 +350,18 @@ static void receive(const demo_event_t &e) {
     flow_follow(before,e.us,e.kind==DE_SCALE||e.kind==DE_RS||e.kind==DE_AUX);
     render_needed=true;
 }
+// ESP Hub captures IDF log output while the standalone console writes to stdout.
+static void console_reply(const char *format, ...) __attribute__((format(printf,1,2)));
+static void console_reply(const char *format, ...) {
+    va_list args;
+    va_start(args,format);
+#if CONFIG_CW_LAUNCHER_APP
+    esp_log_writev(ESP_LOG_INFO,"console",format,args);
+#else
+    vprintf(format,args);
+#endif
+    va_end(args);
+}
 struct ConsoleCommand {char line[80];};
 extern "C" bool cw_console_enqueue(const char *line) {
     if(!console_commands)return false;
@@ -459,41 +472,41 @@ extern "C" void app_main() {
             else if(!strcmp(cmd.line,"screen"))board_dump();
             else if(!strcmp(cmd.line,"scales")) {
                 double span=(aux_last_us-aux_first_us)/1e6;
-                printf("SCALES bookoo=%u aux=%u aux_cg=%ld aux_count=%u aux_hz=%.2f aux_max_gap_ms=%lld aux_last_ms_ago=%lld\n",flow.scale_ready,flow.aux_ready,(long)flow.aux_cg,aux_count,
+                console_reply("SCALES bookoo=%u aux=%u aux_cg=%ld aux_count=%u aux_hz=%.2f aux_max_gap_ms=%lld aux_last_ms_ago=%lld\n",flow.scale_ready,flow.aux_ready,(long)flow.aux_cg,aux_count,
                     aux_count>1&&span>0?(aux_count-1)/span:0.0,(long long)(aux_max_gap_us/1000),(long long)(aux_count?(now-aux_last_us)/1000:-1));
             }
-            else if(!strcmp(cmd.line,"beep")) {audio_chirp();puts("BEEP quiet 30ms requested");}
+            else if(!strcmp(cmd.line,"beep")) {audio_chirp();console_reply("BEEP quiet 30ms requested\n");}
             else if(!strcmp(cmd.line,"update status")) {
                 firmware_update_status_t s={};firmware_update_get_status(&s);
-                printf("UPDATE state=%u busy=%u bytes=%u total=%u version=%s error=%d message=%s\n",(unsigned)s.state,s.busy,(unsigned)s.received_bytes,(unsigned)s.total_bytes,s.version,(int)s.error,s.message);
+                console_reply("UPDATE state=%u busy=%u bytes=%u total=%u version=%s error=%d message=%s\n",(unsigned)s.state,s.busy,(unsigned)s.received_bytes,(unsigned)s.total_bytes,s.version,(int)s.error,s.message);
             }
             else if(!strcmp(cmd.line,"update open")) {last_activity=now;firmware_open();}
             else if(!strcmp(cmd.line,"update cancel")) {last_activity=now;if(ui.firmware_open)firmware_close();}
             else if(!strcmp(cmd.line,"dropbox status")) {
-                char json[384];if(dropbox_setup_status(json,sizeof json)>0)printf("DROPBOX %s\n",json);
+                char json[384];if(dropbox_setup_status(json,sizeof json)>0)console_reply("DROPBOX %s\n",json);
             }
             else if(!strcmp(cmd.line,"dropbox check")||!strcmp(cmd.line,"dropbox test")) {
                 cw_dropbox_command_t check={};check.op=!strcmp(cmd.line,"dropbox test")?4:3;
-                puts(dropbox_setup_submit(&check)?"DROPBOX check queued":"DROPBOX busy");
+                console_reply("%s\n",dropbox_setup_submit(&check)?"DROPBOX check queued":"DROPBOX busy");
             }
             else if(!strcmp(cmd.line,"record status")) {
-                printf("RECORD state=%u revision=%u id=%s path=%s error=%s\n",ui.record.state,ui.record.revision,ui.record.id,ui.record.path,ui.record.error);
+                console_reply("RECORD state=%u revision=%u id=%s path=%s error=%s\n",ui.record.state,ui.record.revision,ui.record.id,ui.record.path,ui.record.error);
             }
             else if(!strcmp(cmd.line,"record backups")) {
                 char json[2048];unsigned count=0;
-                for(unsigned i=0;i<8;i++)if(brew_backup_json(i,json,sizeof json)>0) {printf("BACKUP %s\n",json);count++;}
-                printf("BACKUPS count=%u trace_samples_persisted=false\n",count);
+                for(unsigned i=0;i<8;i++)if(brew_backup_json(i,json,sizeof json)>0) {console_reply("BACKUP %s\n",json);count++;}
+                console_reply("BACKUPS count=%u trace_samples_persisted=false\n",count);
             }
-            else if(!strcmp(cmd.line,"mode"))printf("MODE %s sensor=%u scale=%u\n",app.mode==CW_APP_HOME?"home":app.mode==CW_APP_BREW?"brew":"color",app.sensor_present,flow.scale_ready);
-            else if(!strcmp(cmd.line,"netstatus"))printf("NETWORK state=%u setup=%u paired=%u saved=%u reason=%d setup_error=%d\n",ui.network.state,ui.network.setup_active,ui.network.paired,ui.network.saved,ui.network.reason,ui.network.setup_error);
+            else if(!strcmp(cmd.line,"mode"))console_reply("MODE %s sensor=%u scale=%u\n",app.mode==CW_APP_HOME?"home":app.mode==CW_APP_BREW?"brew":"color",app.sensor_present,flow.scale_ready);
+            else if(!strcmp(cmd.line,"netstatus"))console_reply("NETWORK state=%u setup=%u paired=%u saved=%u reason=%d setup_error=%d\n",ui.network.state,ui.network.setup_active,ui.network.paired,ui.network.saved,ui.network.reason,ui.network.setup_error);
             else if(!strcmp(cmd.line,"status")) {
-                printf("STATUS stage=%u generation=%u scale=%u rs=%u phase=%u dose_valid=%u dose_cg=%ld weight_cg=%ld empty_cg=%ld beverage_cg=%ld\n",flow.stage,flow.generation,flow.scale_ready,flow.rs_ready,flow.scale.phase,flow.scale.dose_valid,(long)flow.scale.dose_cg,(long)flow.live_cg,(long)flow.empty_cg,(long)flow.beverage_cg);
-                printf("DUAL aux=%u aux_cg=%ld dual=%u phase=%u total=%u water_cg=%ld out_cg=%ld out_cgps=%ld peak_cgps=%ld open=%u\n",flow.aux_ready,(long)flow.aux_cg,flow.dual,flow.duo.phase,flow.duo.total,
+                console_reply("STATUS stage=%u generation=%u scale=%u rs=%u phase=%u dose_valid=%u dose_cg=%ld weight_cg=%ld empty_cg=%ld beverage_cg=%ld\n",flow.stage,flow.generation,flow.scale_ready,flow.rs_ready,flow.scale.phase,flow.scale.dose_valid,(long)flow.scale.dose_cg,(long)flow.live_cg,(long)flow.empty_cg,(long)flow.beverage_cg);
+                console_reply("DUAL aux=%u aux_cg=%ld dual=%u phase=%u total=%u water_cg=%ld out_cg=%ld out_cgps=%ld peak_cgps=%ld open=%u\n",flow.aux_ready,(long)flow.aux_cg,flow.dual,flow.duo.phase,flow.duo.total,
                     (long)flow.duo.water_cg,(long)flow.duo.out_cg,(long)flow.duo.out_cgps,(long)flow.duo.peak_cgps,flow.duo.open_valid);
             }
             else if(!strcmp(cmd.line,"probe")) {
                 probe_reading_t p;probe_trace_reading(&p);
-                printf("PROBE valid=%u celsius=%.2f ratio=%.4f ntc_mv=%d ref_mv=%d trace_active=%u brew_started=%u samples=%u truncated=%u\n",p.valid,(double)p.celsius,(double)p.ratio,p.ntc_mv,p.ref_mv,p.active,p.brew_started,p.count,p.truncated);
+                console_reply("PROBE valid=%u celsius=%.2f ratio=%.4f ntc_mv=%d ref_mv=%d trace_active=%u brew_started=%u samples=%u truncated=%u\n",p.valid,(double)p.celsius,(double)p.ratio,p.ntc_mv,p.ref_mv,p.active,p.brew_started,p.count,p.truncated);
             }
             else if(!strcmp(cmd.line,"home")) {last_activity=now;go_home();}
             // The Home tiles from the console; only a connected device can be opened.
