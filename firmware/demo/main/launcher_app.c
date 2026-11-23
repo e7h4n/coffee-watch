@@ -26,7 +26,7 @@ void cw_launcher_net_start(void)
             if (esp_timer_get_time() >= deadline) {
                 esp_err_t err = okou_nvs_set_u8(OKOU_KEY_HOLD, 1);
                 if (err == ESP_OK) {
-                    err = okou_enter_setup();
+                    err = okou_enter_bootloader();
                     okou_nvs_erase(OKOU_KEY_HOLD);
                 }
                 ESP_LOGE(TAG, "Entering bootloader: %s", esp_err_to_name(err));
