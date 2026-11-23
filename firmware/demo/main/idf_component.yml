@@ -3,4 +3,4 @@ dependencies:
   okou_agent:
     git: https://github.com/okou-ai/esphub.git
     path: firmware/components/okou_agent
-    version: e57433def4e6b07ffde39040b3222ded05ff413d
+    version: 70a939ef735558688c44c6e3c57a3ce13fab3b2e
