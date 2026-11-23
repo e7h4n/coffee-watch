@@ -45,9 +45,10 @@ connect.addEventListener('click', async () => {
   error();
   if (paired) {watch.disconnect();detached();status('Setup connection closed', 'Check the watch for network status. Closing Bluetooth does not cancel a network request.');return;}
   connect.disabled = true;connect.textContent = 'Choose your watch…';
-  status('Connect and pair', 'Keep Wi-Fi setup open on the watch. Enter its code in the system pairing dialog if asked.');
+  const setupHint = 'Open Dropbox setup on the watch (Wi-Fi setup on standalone firmware).';
+  status('Connect and pair', `${setupHint} Keep it open and enter its six-digit code if asked.`);
   try {await watch.connect();}
-  catch (e) {detached();error(e.name === 'NotFoundError' ? 'No watch selected. Open Wi-Fi setup on the watch and try Connect watch again.' : `${e.message} Keep the setup screen open and complete the system pairing dialog.`);}
+  catch (e) {detached();error(e.name === 'NotFoundError' ? `No watch selected. ${setupHint} Then choose Connect watch again.` : `${e.message} Keep the setup screen open and complete the system pairing dialog.`);}
   finally {connect.disabled = false;}
 });
 $('show-password').addEventListener('click', () => {
