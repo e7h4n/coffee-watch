@@ -4,7 +4,7 @@ import json
 import sys
 from pathlib import Path
 
-PROFILE = b"ESPHUB1/micropython/stopwatch\0"
+PROFILE = b"coffee-watch/native/stopwatch\0"
 
 
 def describe(image, version):
@@ -15,7 +15,7 @@ def describe(image, version):
     built_version = image[48:80].split(b"\0", 1)[0].decode()
     if built_version != version:
         raise ValueError(f"Image version {built_version!r} differs from {version!r}")
-    return dict(board="stopwatch", kind="micropython", native=True, version=version,
+    return dict(board="stopwatch", kind="native", native=True, version=version,
                 size=len(image), sha256=hashlib.sha256(image).hexdigest(),
                 image_profile=PROFILE[:-1].decode(), app_offset=0x420000)
 

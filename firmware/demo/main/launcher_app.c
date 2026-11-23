@@ -11,6 +11,10 @@
 #include "okou_agent.h"
 #include "okou_agent_ext.h"
 
+/* Identifies the managed native application in the USB installation package. */
+static const char coffee_watch_profile[] __attribute__((used, section(".rodata_custom_desc"), aligned(4))) =
+    "coffee-watch/native/stopwatch";
+
 static const char *TAG = "launcher_app";
 
 static int cmd_console(int argc, char **argv, okou_out_t *out)
