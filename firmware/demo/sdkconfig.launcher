@@ -1,11 +1,8 @@
 # esp-launcher app variant: build with
 #   idf.py -B build-launcher -DSDKCONFIG=build-launcher/sdkconfig \
 #     -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.launcher" build
-# The watch must keep working offline: it validates itself after local health checks and
-# never falls back to the launcher just because the hub is unreachable.
 CONFIG_CW_LAUNCHER_APP=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions-launcher.csv"
-CONFIG_OKOU_MAX_FAIL_BOOTS=0
 # Full ELF SHA-256 in core dumps so esp-launcher tools/symbolize.py can match the exact ELF.
 CONFIG_APP_RETRIEVE_LEN_ELF_SHA=64
 # Crash evidence for the launcher's coredump op (coredump partition exists in the launcher layout).

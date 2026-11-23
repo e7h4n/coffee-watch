@@ -291,7 +291,9 @@ extern "C" void app_main() {
     uint8_t mac[6];esp_read_mac(mac,ESP_MAC_WIFI_STA);char session[40];
     snprintf(session,sizeof session,"%02x%02x%02x%02x%02x%02x-%08lx%08lx",mac[0],mac[1],mac[2],mac[3],mac[4],mac[5],(unsigned long)esp_random(),(unsigned long)esp_random());cw_record_init(&records,session);color_mode_init(session);
     wifi_setup_init();ESP_ERROR_CHECK(firmware_update_init());transport_init();xTaskCreate(console_task,"console",4096,nullptr,2,nullptr);
+#if !CONFIG_CW_LAUNCHER_APP
     const int64_t health_started=now_us();bool boot_health_checked=false;
+#endif
     ESP_LOGI("demo","coffee-watch-demo-v3; battery=%d; UI=%dx%d",ui.battery_percent,(int)board_canvas().width(),(int)board_canvas().height());
     int64_t last_draw=0,last_activity=now_us(),last_battery=last_activity;
     int battery_percent=ui.battery_percent;
@@ -353,6 +355,7 @@ extern "C" void app_main() {
             ESP_LOGI("battery","level=%d",battery_percent);
             ui.battery_percent=battery_percent;render_needed=true;
         }
+#if !CONFIG_CW_LAUNCHER_APP
         if(!boot_health_checked&&now-health_started>=10000000) {
             boot_health_checked=true;
             // NVS startup was checked above without erase; a rendered first frame,
@@ -361,6 +364,7 @@ extern "C" void app_main() {
             esp_err_t health=firmware_update_mark_running_valid_after_health(board_canvas().width()==468&&board_canvas().height()==466,true);
             ESP_LOGI("update","boot health result=%s",esp_err_to_name(health));
         }
+#endif
         if(ui.carousel_dir) {
             float t=(now-animation_start)/(float)design::motion::carousel_us;
             if(t>=1) {

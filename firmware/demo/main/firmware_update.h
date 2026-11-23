@@ -2,6 +2,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include "esp_err.h"
+#include "sdkconfig.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -35,9 +36,11 @@ esp_err_t firmware_update_get_status(firmware_update_status_t *out);
  * false refuses activation; true does not prove ownership. READY only.
  * Success selects boot partition and immediately restarts, does not return. */
 esp_err_t firmware_update_activate_and_restart(bool modal_safety_lock_owned);
+#if !CONFIG_CW_LAUNCHER_APP
 /* Call after successful UI and NVS startup health. Verifies actual running
  * partition and pending state. VALID is idempotent; all other states refuse. */
 esp_err_t firmware_update_mark_running_valid_after_health(bool ui_healthy, bool nvs_healthy);
+#endif
 #ifdef __cplusplus
 }
 #endif

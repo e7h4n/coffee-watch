@@ -18,9 +18,6 @@
 #include "esp_image_format.h"
 #include "esp_app_format.h"
 #include "esp_system.h"
-#if CONFIG_CW_LAUNCHER_APP
-#include "okou_agent.h"
-#endif
 #include "esp_timer.h"
 #include "esp_log.h"
 #include "mbedtls/sha256.h"
@@ -412,14 +409,9 @@ esp_err_t firmware_update_activate_and_restart(bool lock_owned)
     esp_restart();
     return ESP_FAIL;
 }
+#if !CONFIG_CW_LAUNCHER_APP
 esp_err_t firmware_update_mark_running_valid_after_health(bool ui, bool nvs)
 {
-#if CONFIG_CW_LAUNCHER_APP
-    /* No updater worker in the launcher variant; the same local health gate (rendered UI, NVS,
-     * ten seconds of main-loop heartbeats) marks the launcher-installed image valid. */
-    if (!ui || !nvs) return ESP_ERR_INVALID_STATE;
-    return okou_app_mark_valid(); /* also reports app.valid to the hub */
-#endif
     if (!ui || !nvs || !s_worker) return ESP_ERR_INVALID_STATE;
     LOCK();
     esp_err_t err = s_status.busy ? ESP_ERR_INVALID_STATE : layout(NULL, false);
@@ -431,3 +423,4 @@ esp_err_t firmware_update_mark_running_valid_after_health(bool ui, bool nvs)
     }
     UNLOCK(); return err;
 }
+#endif
