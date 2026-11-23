@@ -10,6 +10,9 @@ constexpr uint32_t water_area=0x223028,water_edge=0x55685c;
 constexpr uint32_t out_area=0x29423f,out_edge=0x78a39b;
 constexpr int center_x=234,center_y=233,button_top=354;
 constexpr int button_height=466-button_top,button_center_y=button_top+button_height/2;
+namespace setup_close {
+constexpr int width=112,height=44,left=center_x-width/2,top=392;
+}
 namespace type {
 constexpr int hero=90,status=44,ready=60,label=22,body=26;
 constexpr int metric=36,result=46,button=34,time=64;

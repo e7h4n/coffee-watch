@@ -149,7 +149,11 @@ bool ui_enabled(const cw_flow_t &s,int action,const UiState *u) {
 }
 int ui_hit(const cw_flow_t &s,int x,int y,const UiState *u) {
     if((x-234)*(x-234)+(y-233)*(y-233)>233*233)return 0;
-    if(u&&u->home&&!u->wifi_setup) {
+    if(u&&u->wifi_setup) {
+        using namespace design::setup_close;
+        return x>=left&&x<left+width&&y>=top&&y<top+height?1:0;
+    }
+    if(u&&u->home) {
         int hit=y>=design::button_top?UI_HOME_WIFI:(x>=74&&x<394&&y>=160&&y<232)?UI_HOME_BREW:(x>=74&&x<394&&y>=248&&y<320)?UI_HOME_COLOR:0;
         return hit&&ui_enabled(s,hit,u)?hit:0;
     }
@@ -265,14 +269,16 @@ void ui_draw(const cw_flow_t &s,const UiState &u) {
         text(label,234,438,u.record.state==CW_RECORD_FAILED?12:16,u.record.state==CW_RECORD_SAVED?ACCENT:MUTED);
     }
     if(u.wifi_setup) {
-        text(SETUP_LABEL,234,116,40);
+        text(SETUP_LABEL,234,80,34);
+        text("Open in Chrome",234,123,20,MUTED);
+        text("e7h4n.github.io/coffee-watch/",234,154,26,ACCENT,376);
         if(u.network.setup_active) {
-            text(u.network.paired?"Browser paired":"Pairing code",234,174,22,MUTED);
-            fmt(234,229,90,FG,"%06u",u.network.passkey);
-        } else text(u.network.setup_error?"Bluetooth unavailable":"Opening setup",234,229,32,MUTED);
+            text(u.network.paired?"Browser paired":"Bluetooth pairing code",234,201,22,MUTED);
+            fmt(234,251,64,FG,"%06u",u.network.passkey);
+        } else text(u.network.setup_error?"Bluetooth unavailable":"Opening setup",234,251,32,MUTED);
         const char *states[]={"Not configured","Connecting","Connected","Connection failed","Disconnected"};
-        text(states[u.network.state],234,296,26,u.network.state==CW_NET_CONNECTED?ACCENT:MUTED);
-        if(u.network.state==CW_NET_CONNECTED)text(u.network.ip,234,326,20,MUTED);
+        text(states[u.network.state],234,305,24,u.network.state==CW_NET_CONNECTED?ACCENT:MUTED);
+        if(u.network.state==CW_NET_CONNECTED)text(u.network.ip,234,334,20,MUTED);
         if(u.network.dropbox_state[0]) {
             const char *dropbox="Dropbox not configured";
             if(!strcmp(u.network.dropbox_state,"saved"))dropbox="Dropbox authorization saved";
@@ -280,9 +286,11 @@ void ui_draw(const cw_flow_t &s,const UiState &u) {
             else if(!strcmp(u.network.dropbox_state,"verifying"))dropbox="Dropbox: checking upload";
             else if(!strcmp(u.network.dropbox_state,"connected"))dropbox="Dropbox upload verified";
             else if(!strcmp(u.network.dropbox_state,"failed"))dropbox="Dropbox: check browser";
-            text(dropbox,234,354,18,MUTED);
+            text(dropbox,234,365,20,MUTED);
         }
-        bottom("Close",true,u.held==1);return;
+        using namespace design::setup_close;
+        c->drawRoundRect(left,top,width,height,16,u.held==1?ACCENT:LINE);
+        text("Close",234,top+height/2,22,ACCENT,0,true);return;
     }
     if(u.home) {
         // Home: the first device to connect picks the product; a connected one is also a choice.

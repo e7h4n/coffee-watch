@@ -16,7 +16,7 @@ class HomeInput(unittest.TestCase):
         fixture = """
 #include <cassert>
 enum {CW_HOME,CW_BREWER,CW_EMPTY,CW_BREW};
-namespace design { constexpr int button_top=354; }
+#include "design.h"
 struct UiState {
     bool home=true, wifi_setup=false, home_scale=true, home_color=true;
 };
@@ -39,6 +39,11 @@ int main() {
     ui.home_color=false;
     assert(ui_hit(flow,234,200,&ui)==0);
     assert(ui_hit(flow,234,280,&ui)==0);
+    ui.wifi_setup=true;
+    assert(ui_hit(flow,234,365,&ui)==0); // Dropbox status
+    assert(ui_hit(flow,130,410,&ui)==0); // Outside compact Close
+    assert(ui_hit(flow,234,410,&ui)==1);
+    assert(ui_enabled(flow,1,&ui)); // Physical Select
 }
 """
         with tempfile.TemporaryDirectory() as tmp:
@@ -46,7 +51,7 @@ int main() {
             binary = source.with_suffix("")
             source.write_text(fixture + actions + "\n" + handlers + checks)
             subprocess.run(["c++", "-std=c++17", "-Wall", "-Wextra", "-Werror",
-                            str(source), "-o", str(binary)], check=True)
+                            "-I", str(ROOT / "firmware/demo/main"), str(source), "-o", str(binary)], check=True)
             subprocess.run([str(binary)], check=True)
 
     def test_boot_health(self):
