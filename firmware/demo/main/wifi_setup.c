@@ -167,6 +167,7 @@ static void station_ip(char *ip,size_t n) {
 }
 static void network_task(void *arg) {
     bool first=true,was_up=false;
+    bool clock_started=false;
     char last_ssid[33]="";
     for(;;) {
         vTaskDelay(pdMS_TO_TICKS(1000));
@@ -175,6 +176,10 @@ static void network_task(void *arg) {
         bool saved=okou_wifi_count()>0;
         portENTER_CRITICAL(&lock);view.saved=saved;portEXIT_CRITICAL(&lock);
         if(up)station_ip(ip,sizeof ip);
+        if(up&&!clock_started) {
+            esp_sntp_config_t config=ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
+            clock_started=esp_netif_sntp_init(&config)==ESP_OK;
+        }
         if(first||up!=was_up||strcmp(ssid,last_ssid)) {
             first=false;
             network_state(up?CW_NET_CONNECTED:(okou_wifi_count()?CW_NET_CONNECTING:CW_NET_UNCONFIGURED),0,up?ssid:"",up?ip:NULL);

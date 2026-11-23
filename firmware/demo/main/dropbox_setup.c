@@ -138,7 +138,7 @@ static bool text_field(cJSON *json,const char *key,char *out,size_t size) {
 static bool clock_ready(void) {
     if(time(NULL)>1735689600)return true;
 #if CONFIG_CW_LAUNCHER_APP
-    // The Hub starts SNTP on the first IP. Wait for its clock without reinitializing it.
+    // The managed network task starts SNTP on the first IP. Wait for its clock without reinitializing it.
     for (int i=0; i<30 && time(NULL)<=1735689600; ++i) vTaskDelay(pdMS_TO_TICKS(500));
     return time(NULL)>1735689600;
 #else
