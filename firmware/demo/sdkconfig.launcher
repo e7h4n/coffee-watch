@@ -2,6 +2,7 @@
 #   idf.py -B build-launcher -DSDKCONFIG=build-launcher/sdkconfig \
 #     -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.launcher" build
 CONFIG_CW_LAUNCHER_APP=y
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=n
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions-launcher.csv"
 # Full ELF SHA-256 in core dumps so esp-launcher tools/symbolize.py can match the exact ELF.
 CONFIG_APP_RETRIEVE_LEN_ELF_SHA=64
