@@ -59,6 +59,7 @@ static bool s_started;
 
 void cw_launcher_net_start(void)
 {
+    ESP_LOGI(TAG, "Starting %s", coffee_watch_profile);
     okou_config_t cfg = OKOU_CONFIG_DEFAULT();
     cfg.manage_network = true; /* the SDK's Wi-Fi manager is shared with the launcher (okl/wifis) */
     cfg.app_validates = true;  /* local boot health marks the image valid; works offline */
