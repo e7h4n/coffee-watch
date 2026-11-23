@@ -19,8 +19,7 @@ color tile, and Wi-Fi setup. Whichever connects first picks the product: the sca
 opens the brew assistant, the RoastWatch color sensor opens roast color mode. Hold
 both keys for 0.9 s on any page to return Home; a device that is still connected is
 then offered as a lit tile instead of reopening by itself. Wi-Fi and Dropbox are
-shared by both. EspHub manages updates for the launcher build. On standalone
-builds, the **Firmware** chip at the top of Home opens the updater.
+shared by both.
 
 ## From brewing to a report
 
@@ -129,13 +128,7 @@ page does not upload or save them. See the [Wi-Fi interface guide](spec/wifi.md)
 ## Standalone firmware updates
 
 The 16 MiB watch now targets two 4 MiB application slots, with **7.93 MiB reserved
-for future local data**. No SD card or image-sized RAM buffer is needed. From
-Home, tap **Firmware**, check the GitHub Release, download into the inactive slot,
-then explicitly choose **Restart & install**. Downloads and installation require
-at least 30% battery; falling below 20% or an unknown reading cancels a download.
-The update modal blocks brewing/color entry and serializes Dropbox admission;
-active/queued uploads and retained unsaved records prevent admission. Back and
-Home wait for cancellation to finish before releasing that protection.
+for future local data**. The standalone build has no on-watch update controls.
 
 New OTA boots are confirmed only after a rendered UI, successful NVS startup and
 ten seconds of watchdog-monitored main-loop health; otherwise the bootloader can
@@ -161,8 +154,7 @@ python3 fetch_drivers.py
 idf.py -DPROJECT_VER=dev build
 ```
 
-This builds only; use the guarded USB procedure above for first migration and
-Home → Firmware afterwards. The driver helper downloads M5Stack drivers pinned
+Use the guarded USB procedure above for first migration. The driver helper downloads M5Stack drivers pinned
 to specific commits. The firmware CI tests and builds PR candidates, and publishes
 versioned application/manifest/checksums plus a separate USB-only ZIP on `main`.
 An existing generated `sdkconfig` overrides defaults: use a fresh configuration

@@ -9,8 +9,6 @@
 #include "app_mode.h"
 #include "launcher_app.h"
 #include "firmware_update.h"
-#include "update_policy.h"
-#include "esp_app_desc.h"
 #include "esp_task_wdt.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -38,79 +36,6 @@ static int64_t network_activity_us;
 static unsigned slow_drip_seen;
 static int64_t animation_start;
 static int queued[16];static unsigned queue_read,queue_write;
-// Main owns the update modal. A separate worker owns downloads; do not release
-// Dropbox admission or leave this modal until that worker acknowledges idle.
-static int64_t now_us();
-static bool firmware_lock=false,firmware_close_when_idle=false;
-static int64_t firmware_last_poll;
-static void firmware_notice(const char *message) {
-    snprintf(ui.firmware_notice,sizeof ui.firmware_notice,"%s",message);render_needed=true;
-}
-static void firmware_leave() {
-    if(firmware_lock)dropbox_setup_maintenance_end();
-    firmware_lock=false;firmware_close_when_idle=false;ui.firmware_open=false;ui.held=0;render_needed=true;
-}
-static void firmware_sync(int64_t now,bool force=false) {
-    if(!ui.firmware_open||(!force&&now-firmware_last_poll<100000))return;
-    firmware_last_poll=now;firmware_update_status_t status={};
-    if(firmware_update_get_status(&status)!=ESP_OK)return;
-    auto &old=ui.firmware_update;
-    if(status.state!=old.state||status.busy!=old.busy||status.received_bytes!=old.received_bytes||status.total_bytes!=old.total_bytes||
-       strcmp(status.version,old.version)||strcmp(status.message,old.message))render_needed=true;
-    old=status;
-#if CONFIG_CW_LAUNCHER_APP
-    bool enabled=false;
-#else
-    bool enabled=!firmware_close_when_idle;
-#endif
-    if(enabled!=ui.firmware_primary_enabled) {ui.firmware_primary_enabled=enabled;render_needed=true;}
-    if(status.busy&&cw_update_must_cancel_for_power(ui.battery_percent)) {
-        firmware_update_cancel();firmware_notice("Battery low; stopping update");
-    }
-    if(firmware_close_when_idle&&!status.busy)firmware_leave();
-}
-static void firmware_close() {
-    firmware_update_cancel();firmware_close_when_idle=true;firmware_sync(now_us(),true);
-}
-static bool firmware_admit() {
-    if(firmware_lock)return true;
-    if(!cw_update_idle_allowed(app.mode==CW_APP_HOME,flow.stage==CW_HOME||flow.stage==CW_BREWER,flow.interrupted,ui.wifi_setup)) {
-        firmware_notice("Return Home after finishing brew");return false;
-    }
-    if(!dropbox_setup_maintenance_begin()) {firmware_notice("Finish or save pending uploads");return false;}
-    firmware_lock=true;return true;
-}
-static void firmware_request(bool download) {
-    if(!firmware_admit())return;
-    if(ui.network.state!=CW_NET_CONNECTED) {firmware_notice("Connect Wi-Fi from Home first");return;}
-    if(download&&!cw_update_power_allowed(board_battery_percent())) {firmware_notice("Charge battery to at least 30%");return;}
-    ui.firmware_notice[0]=0;
-    esp_err_t err=download?firmware_update_request_download():firmware_update_request_check();
-    if(err!=ESP_OK)render_needed=true; // Worker status carries the specific refusal.
-    firmware_sync(now_us(),true);
-}
-static void firmware_open() {
-    if(ui.firmware_open)return;
-    if(!cw_update_idle_allowed(app.mode==CW_APP_HOME,flow.stage==CW_HOME||flow.stage==CW_BREWER,flow.interrupted,ui.wifi_setup))return;
-    ui.firmware_open=true;ui.held=0;firmware_close_when_idle=false;
-    snprintf(ui.firmware_current,sizeof ui.firmware_current,"%s",esp_app_get_description()->version);
-#if !CONFIG_CW_LAUNCHER_APP
-    firmware_request(false);
-#endif
-    render_needed=true;
-}
-static void firmware_action(int which) {
-    if(which==UI_FIRMWARE_BACK) {firmware_close();return;}
-    if(which!=1||firmware_close_when_idle)return;
-    firmware_sync(now_us(),true);
-    if(ui.firmware_update.busy) {firmware_update_cancel();firmware_notice("Stopping update; please wait");return;}
-    if(ui.firmware_update.state==FIRMWARE_UPDATE_READY) {
-        if(!firmware_admit())return;
-        if(!cw_update_power_allowed(board_battery_percent())) {firmware_notice("Charge battery to at least 30%");return;}
-        esp_err_t err=firmware_update_activate_and_restart(firmware_lock);
-        if(err!=ESP_OK)firmware_notice("Install refused; check update again");
-    } else firmware_request(ui.firmware_update.state==FIRMWARE_UPDATE_AVAILABLE);
-}
 extern "C" void demo_post(const demo_event_t *event) {configASSERT(xQueueSend(events,event,0)==pdTRUE);}
 extern "C" void demo_record_status(const cw_record_status_t *status) {demo_event_t e={};e.kind=DE_RECORD;e.us=esp_timer_get_time();e.data.record=*status;demo_post(&e);}
 static int64_t now_us() {return esp_timer_get_time();}
@@ -132,7 +57,7 @@ static void save_brewer(unsigned brewer) {
 static constexpr int64_t result_page_us=5000000;
 static void turn_page(int dir,int64_t now) {
     int n=ui_result_pages(flow);
-    if(n<2||ui.wifi_setup||ui.firmware_open)return;
+    if(n<2||ui.wifi_setup)return;
     ui.result_page=(ui.result_page+dir+n)%n;ui.page_us=now;render_needed=true;
 }
 // Brew trace: record from Ready through brewing; stop when the brew stops.
@@ -158,7 +83,6 @@ static void trace_follow(int64_t us) {
 // Home from anywhere: leaves roast color, ends the brew session (a connected scale
 // stays connected and is offered on Home) and keeps Wi-Fi and Dropbox running.
 static void go_home() {
-    if(ui.firmware_open) {firmware_close();return;}
     if(app.mode==CW_APP_COLOR)color_mode_leave();
     cw_app_home(&app);
     if(ui.wifi_setup)wifi_setup_close();
@@ -178,7 +102,7 @@ static void enter_brew() {render_needed=true;ESP_LOGI("app","brew stage=%u",flow
 static unsigned scale_epoch_seen,aux_epoch_seen;
 static void app_link(bool fresh=false) {
     bool idle=!flow.interrupted&&(flow.stage==CW_HOME||flow.stage==CW_BREWER);
-    cw_app_mode_t was=app.mode;cw_app_scale(&app,flow.scale_ready||flow.aux_ready,fresh,ui.wifi_setup||ui.firmware_open,idle);
+    cw_app_mode_t was=app.mode;cw_app_scale(&app,flow.scale_ready||flow.aux_ready,fresh,ui.wifi_setup,idle);
     if(was==CW_APP_HOME&&app.mode==CW_APP_BREW)enter_brew();
     else if(was==CW_APP_BREW&&app.mode==CW_APP_HOME)go_home();
 }
@@ -193,17 +117,15 @@ static void dual_view() {
     snprintf(ui.home_scales,sizeof ui.home_scales,"%s",flow.scale_ready&&flow.aux_ready?"BOOKOO + LEFU":flow.scale_ready?"BOOKOO":flow.aux_ready?"LEFU":"");
 }
 static void animate(int dir) {
-    if(ui.firmware_open||app.mode!=CW_APP_BREW||flow.stage!=CW_BREWER)return;
+    if(app.mode!=CW_APP_BREW||flow.stage!=CW_BREWER)return;
     if(ui.carousel_dir) {if(queue_write-queue_read<16)queued[queue_write++%16]=dir;return;}
     ui.carousel_dir=dir;ui.carousel_from=flow.brewer;ui.carousel_progress=0;animation_start=now_us();render_needed=true;
 }
 static void action(int which) {
     if(!ui_enabled(flow,which,&ui)||ui.carousel_dir)return;
-    if(ui.firmware_open) {firmware_action(which);return;}
     if(ui.wifi_setup) {wifi_setup_close();ui.wifi_setup=false;ui.held=0;render_needed=true;return;}
     if(app.mode==CW_APP_HOME) {
         if(which==UI_HOME_WIFI) {ui.wifi_setup=true;ui.held=0;wifi_setup_open();render_needed=true;}
-        else if(which==UI_HOME_FIRMWARE)firmware_open();
         else if(which==UI_HOME_BREW&&cw_app_choose(&app,CW_APP_BREW))enter_brew();
         else if(which==UI_HOME_COLOR&&cw_app_choose(&app,CW_APP_COLOR))enter_color(now_us());
         return;
@@ -218,7 +140,6 @@ static void action(int which) {
     // No Stop action while brewing: lifting the dripper ends the brew.
 }
 static void back() {
-    if(ui.firmware_open) {firmware_close();return;}
     if(ui.wifi_setup) {wifi_setup_close();ui.wifi_setup=false;ui.held=0;render_needed=true;return;}
     if(app.mode==CW_APP_HOME)return;
     // Back from the brewer carousel is Home.
@@ -255,7 +176,7 @@ static void input_tick(BoardInput raw,int64_t now) {
     } else {
         if(in.next&&!in.next_consumed&&now-in.next_start>=650000) {in.next_consumed=true;in.select_consumed=true;back();}
         if(!in.next&&prev_next&&!in.next_consumed&&in.next_gen==flow.generation) {
-            if(!ui.wifi_setup&&!ui.firmware_open&&app.mode==CW_APP_BREW&&flow.stage==CW_BREWER)animate(1);
+            if(!ui.wifi_setup&&app.mode==CW_APP_BREW&&flow.stage==CW_BREWER)animate(1);
             else turn_page(1,now);
         }
         if(!in.select&&prev_select&&!in.select_consumed&&in.select_gen==flow.generation)action(1);
@@ -273,7 +194,7 @@ static void input_tick(BoardInput raw,int64_t now) {
         if(in.touch_action) {if(!in.touch_cancel)action(in.touch_action);}
         else if(!in.touch_cancel) {
             int dx=in.last_x-in.start_x,dy=in.last_y-in.start_y;
-            if(!ui.wifi_setup&&!ui.firmware_open&&std::abs(dx)>50&&std::abs(dx)>std::abs(dy)) {
+            if(!ui.wifi_setup&&std::abs(dx)>50&&std::abs(dx)>std::abs(dy)) {
                 if(app.mode==CW_APP_BREW&&flow.stage==CW_BREWER)animate(dx<0?1:-1);
                 else turn_page(dx<0?1:-1,now);
             }
@@ -400,7 +321,7 @@ extern "C" void app_main() {
         // Home polls G5/G6 twice a second; a newly attached color sensor picks roast color.
         if(app.mode==CW_APP_HOME&&now-last_sensor_poll>=500000) {
             last_sensor_poll=now;bool present=app.sensor_present;
-            cw_app_sensor(&app,color_sensor_probe(),ui.wifi_setup||ui.firmware_open);
+            cw_app_sensor(&app,color_sensor_probe(),ui.wifi_setup);
             if(app.sensor_present!=present)render_needed=true;
             if(app.mode==CW_APP_COLOR)enter_color(now);
         }
@@ -432,7 +353,6 @@ extern "C" void app_main() {
             ESP_LOGI("battery","level=%d",battery_percent);
             ui.battery_percent=battery_percent;render_needed=true;
         }
-        firmware_sync(now);
         if(!boot_health_checked&&now-health_started>=10000000) {
             boot_health_checked=true;
             // NVS startup was checked above without erase; a rendered first frame,
@@ -463,10 +383,6 @@ extern "C" void app_main() {
                 firmware_update_status_t s={};firmware_update_get_status(&s);
                 printf("UPDATE state=%u busy=%u bytes=%u total=%u version=%s error=%d message=%s\n",(unsigned)s.state,s.busy,(unsigned)s.received_bytes,(unsigned)s.total_bytes,s.version,(int)s.error,s.message);
             }
-#if !CONFIG_CW_LAUNCHER_APP
-            else if(!strcmp(cmd.line,"update open")) {last_activity=now;firmware_open();}
-            else if(!strcmp(cmd.line,"update cancel")) {last_activity=now;if(ui.firmware_open)firmware_close();}
-#endif
             else if(!strcmp(cmd.line,"dropbox status")) {
                 char json[384];if(dropbox_setup_status(json,sizeof json)>0)printf("DROPBOX %s\n",json);
             }
@@ -495,7 +411,7 @@ extern "C" void app_main() {
             }
             else if(!strcmp(cmd.line,"home")) {last_activity=now;go_home();}
             // The Home tiles from the console; only a connected device can be opened.
-            else if(!strcmp(cmd.line,"open brew")||!strcmp(cmd.line,"open color")) {last_activity=now;if(app.mode==CW_APP_HOME&&!ui.wifi_setup&&!ui.firmware_open)action(cmd.line[5]=='b'?UI_HOME_BREW:UI_HOME_COLOR);}
+            else if(!strcmp(cmd.line,"open brew")||!strcmp(cmd.line,"open color")) {last_activity=now;if(app.mode==CW_APP_HOME&&!ui.wifi_setup)action(cmd.line[5]=='b'?UI_HOME_BREW:UI_HOME_COLOR);}
             else if(!strcmp(cmd.line,"next")) {last_activity=now;animate(1);}
             else if(!strcmp(cmd.line,"select")) {last_activity=now;action(1);}
             else if(!strcmp(cmd.line,"back")) {last_activity=now;back();}
@@ -511,7 +427,7 @@ extern "C" void app_main() {
         if(cw_initial_request(&flow,initial_packet)) {ESP_LOGI("flow","Scale initialization command=%02X param=%02X",initial_packet[2],initial_packet[3]);transport_write(initial_packet,flow.generation);}
         if(network_activity_us>last_activity)last_activity=network_activity_us;
         // Global product idle policy. Weight updates and repainting are not activity.
-        if(now-last_activity>=idle_limit_us&&!(ui.firmware_open&&ui.firmware_update.busy)) {
+        if(now-last_activity>=idle_limit_us) {
             ESP_LOGI("demo","No interaction or state change for 10 minutes; shutting down");
             board_shutdown();
             vTaskSuspend(nullptr);
