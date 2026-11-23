@@ -19,8 +19,8 @@ color tile, and Wi-Fi setup. Whichever connects first picks the product: the sca
 opens the brew assistant, the RoastWatch color sensor opens roast color mode. Hold
 both keys for 0.9 s on any page to return Home; a device that is still connected is
 then offered as a lit tile instead of reopening by itself. Wi-Fi and Dropbox are
-shared by both. The **Firmware** chip at the top of Home opens explicit update
-checks; updates never run automatically.
+shared by both. EspHub manages updates for the launcher build. On standalone
+builds, the **Firmware** chip at the top of Home opens the updater.
 
 ## From brewing to a report
 

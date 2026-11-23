@@ -463,8 +463,10 @@ extern "C" void app_main() {
                 firmware_update_status_t s={};firmware_update_get_status(&s);
                 printf("UPDATE state=%u busy=%u bytes=%u total=%u version=%s error=%d message=%s\n",(unsigned)s.state,s.busy,(unsigned)s.received_bytes,(unsigned)s.total_bytes,s.version,(int)s.error,s.message);
             }
+#if !CONFIG_CW_LAUNCHER_APP
             else if(!strcmp(cmd.line,"update open")) {last_activity=now;firmware_open();}
             else if(!strcmp(cmd.line,"update cancel")) {last_activity=now;if(ui.firmware_open)firmware_close();}
+#endif
             else if(!strcmp(cmd.line,"dropbox status")) {
                 char json[384];if(dropbox_setup_status(json,sizeof json)>0)printf("DROPBOX %s\n",json);
             }

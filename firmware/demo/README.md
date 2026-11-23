@@ -21,7 +21,7 @@ watch. First migration needs explicit approval, guarded private full-flash/NVS/P
 backups, compatibility checks, and four narrowly scoped USB writes. It is not
 atomic and the first USB boot cannot roll back the old layout. Read
 [firmware update and USB recovery](../../spec/firmware-update.md) before any write.
-Later updates use Home → Firmware → Download → Restart & install. PR CI provides
+Standalone updates use Home → Firmware → Download → Restart & install. PR CI provides
 a versioned candidate ZIP; only `main` publishes a public GitHub Release.
 
 An ignored existing `sdkconfig` overrides `sdkconfig.defaults`. Build with a clean
@@ -121,7 +121,7 @@ RS source. Missing events remain pending until explicit cancellation/Home.
 ## Development console
 
 `status`, `screen`, `home`, `next`, `select`, `back`, `mode`, `open brew` and
-`open color` are diagnostic commands. `update status`, `update open`, and
+`open color` are diagnostic commands. On standalone builds, `update status`, `update open`, and
 `update cancel` use the same protected updater; no serial command bypasses its
 explicit install confirmation, idle/battery or pending-upload checks.
 They invoke the same UI actions; there is no command to inject a measurement.

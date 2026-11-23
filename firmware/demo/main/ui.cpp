@@ -135,6 +135,9 @@ static void stability_bar(float progress) {
     }
 }
 bool ui_enabled(const cw_flow_t &s,int action,const UiState *u) {
+#if CONFIG_CW_LAUNCHER_APP
+    if(action==UI_HOME_FIRMWARE)return false;
+#endif
     if(u&&u->firmware_open)return action==UI_FIRMWARE_BACK||(action==1&&u->firmware_primary_enabled);
     if(u&&u->home&&!u->wifi_setup)return action==UI_HOME_FIRMWARE||action==UI_HOME_WIFI||(action==UI_HOME_BREW&&u->home_scale)||(action==UI_HOME_COLOR&&u->home_color);
     if((u&&u->wifi_setup)||s.stage==CW_HOME||(!s.scale_ready&&s.stage==CW_BREWER))return action==1;
@@ -264,16 +267,13 @@ static void small_metric(const char *value,const char *unit,int x,int y,uint32_t
 void ui_draw(const cw_flow_t &s,const UiState &u) {
     c=&board_canvas();c->fillScreen(BG);cu=&u;
     battery(u);
+#if !CONFIG_CW_LAUNCHER_APP
     if(u.firmware_open) {
         const auto &v=u.firmware_update;
         c->drawRoundRect(148,64,172,36,14,LINE);text("Back",234,82,18,ACCENT);
         text("Firmware",234,131,40);
         char current[48];snprintf(current,sizeof current,"Installed %s",u.firmware_current);
         text(current,234,177,20,MUTED,330);
-#if CONFIG_CW_LAUNCHER_APP
-        text("Updates via ESP Hub",234,250,30,ACCENT);
-        return;
-#endif
         text(v.version[0]?v.version:"Coffee Watch",234,222,34,v.version[0]?ACCENT:FG,330);
         const char *status="Choose Check update";
         switch(v.state) {
@@ -296,6 +296,7 @@ void ui_draw(const cw_flow_t &s,const UiState &u) {
         const char *label=v.busy?"Cancel":v.state==FIRMWARE_UPDATE_READY?"Restart & install":v.state==FIRMWARE_UPDATE_AVAILABLE?"Download":"Check update";
         bottom(label,u.firmware_primary_enabled,u.held==1);return;
     }
+#endif
     if(!u.wifi_setup&&u.record_visible&&(s.stage==CW_TDS||s.stage==CW_REPORT)) {
         char failed[56];snprintf(failed,sizeof failed,"Dropbox: %s",u.record.error[0]?u.record.error:"save failed");
         const char *label=u.record.state==CW_RECORD_SAVING?"Dropbox: saving":u.record.state==CW_RECORD_SAVED?"Dropbox: saved":failed;
@@ -323,8 +324,10 @@ void ui_draw(const cw_flow_t &s,const UiState &u) {
     }
     if(u.home) {
         // Home: the first device to connect picks the product; a connected one is also a choice.
-        c->drawRoundRect(148,64,172,36,14,u.held==UI_HOME_FIRMWARE?ACCENT:LINE);
-        text("Firmware",234,82,18,ACCENT);
+        if(ui_enabled(s,UI_HOME_FIRMWARE,&u)) {
+            c->drawRoundRect(148,64,172,36,14,u.held==UI_HOME_FIRMWARE?ACCENT:LINE);
+            text("Firmware",234,82,18,ACCENT);
+        }
         text("Connect scale or color sensor",234,118,design::type::body,MUTED);
         struct Tile {const char *label,*on,*off;bool enabled;int action,top;};
         const Tile tiles[]={{"Brew",u.home_scales[0]?u.home_scales:"Scale connected","Searching for scale",u.home_scale,UI_HOME_BREW,160},
