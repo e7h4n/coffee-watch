@@ -52,6 +52,6 @@ direct_dependencies:
 - espressif/i2c_bus
 - idf
 - okou_agent
-manifest_hash: 156ef124b5463b9391d5593a53572dd3f1dcc9b2680d97a2083c5db1aaaed814
+manifest_hash: fd63274e857ed3537463303709ef007ee2a4d01953ab5e2bbd7976a0437498be
 target: esp32s3
 version: 2.0.0
