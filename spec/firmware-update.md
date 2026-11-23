@@ -119,29 +119,11 @@ its fixed GitHub release origin/tag and rejects incompatible product/chip/layout
 non-newer numeric versions, oversized/truncated responses and digest mismatches.
 No credentials, alternate hosts or arbitrary manifest download URLs are supported.
 
-## Watch controls, transport and data protection
+## Standalone updater transport
 
-Home → **Firmware** opens a user-requested check. **Download** writes only the
-inactive slot; it never changes boot selection. **Restart & install** is a
-separate explicit confirmation. There are no automatic checks, downloads or
-restarts. Serial `update open`, `update status` and `update cancel` share the same
-modal/idle protections; serial offers no install bypass.
-
-Entry requires Home and an idle flow. The Dropbox maintenance gate atomically
-reserves admission only when no initialization, reserved/queued command or active
-upload remains, and no unconfirmed brew/color revision or ambiguous write is
-retained. A cached trace whose CSV **and draft JSON are already confirmed** is
-not an unsaved upload: returning Home may then allow OTA without discarding that
-cache. A resumed draft or later complete attempt becomes unconfirmed again until
-its own JSON is reliably confirmed. Failed/ambiguous work is never silently
-cleared to permit an update. This is a volatile-worker guard, not a durable outbox.
-
-While the modal is open, scale/color auto-entry, manual brew/color actions and
-Home/Back state resets cannot bypass it. Back/Home requests cancellation, then
-keeps the modal and Dropbox admission until the worker reports idle **after
-cleanup**. Idle shutdown is suspended while busy. Download and activation require
-30–100% measured battery. Below 20% or an unknown/invalid reading cancels busy
-work; the board does not measure USB power presence, so a cable is not an override.
+The watch UI has no firmware controls. EspHub-managed watches receive native
+application updates through the bootloader. Serial `update status` reports the
+local updater state.
 
 Cold-clock checks synchronize the already-initialized shared SNTP service before
 any HTTPS, without requiring Dropbox authorization. Synchronization uses at most

@@ -93,7 +93,7 @@ int ui_result_pages(const cw_flow_t &s) {
 }
 bool ui_curve_page(const cw_flow_t &s,const UiState &u) {return (s.stage==CW_TDS&&u.result_page==1)||(s.stage==CW_REPORT&&u.result_page==2);}
 bool ui_tick(const cw_flow_t &s,const UiState &u,int64_t now) {
-    int page=u.firmware_open?103:u.home?102:s.interrupted?100:(!s.scale_ready&&s.stage!=CW_TDS&&s.stage!=CW_REPORT?101:(int)s.stage*4+u.result_page);
+    int page=u.home?102:s.interrupted?100:(!s.scale_ready&&s.stage!=CW_TDS&&s.stage!=CW_REPORT?101:(int)s.stage*4+u.result_page);
     if(page!=previous_page) {previous_page=page;entered_us=now;have_value=false;}
     enter=std::clamp((now-entered_us)/(float)design::motion::enter_us,0.f,1.f);
     enter=1-std::pow(1-enter,3);
@@ -135,8 +135,7 @@ static void stability_bar(float progress) {
     }
 }
 bool ui_enabled(const cw_flow_t &s,int action,const UiState *u) {
-    if(u&&u->firmware_open)return action==UI_FIRMWARE_BACK||(action==1&&u->firmware_primary_enabled);
-    if(u&&u->home&&!u->wifi_setup)return action==UI_HOME_FIRMWARE||action==UI_HOME_WIFI||(action==UI_HOME_BREW&&u->home_scale)||(action==UI_HOME_COLOR&&u->home_color);
+    if(u&&u->home&&!u->wifi_setup)return action==UI_HOME_WIFI||(action==UI_HOME_BREW&&u->home_scale)||(action==UI_HOME_COLOR&&u->home_color);
     if((u&&u->wifi_setup)||s.stage==CW_HOME||(!s.scale_ready&&s.stage==CW_BREWER))return action==1;
     if(s.interrupted||!s.scale_ready)return false;
     if(action==1) {
@@ -150,12 +149,8 @@ bool ui_enabled(const cw_flow_t &s,int action,const UiState *u) {
 }
 int ui_hit(const cw_flow_t &s,int x,int y,const UiState *u) {
     if((x-234)*(x-234)+(y-233)*(y-233)>233*233)return 0;
-    if(u&&u->firmware_open) {
-        int hit=x>=148&&x<320&&y>=64&&y<100?UI_FIRMWARE_BACK:y>=design::button_top?1:0;
-        return hit&&ui_enabled(s,hit,u)?hit:0;
-    }
     if(u&&u->home&&!u->wifi_setup) {
-        int hit=x>=148&&x<320&&y>=64&&y<100?UI_HOME_FIRMWARE:y>=design::button_top?UI_HOME_WIFI:(x>=74&&x<394&&y>=160&&y<232)?UI_HOME_BREW:(x>=74&&x<394&&y>=248&&y<320)?UI_HOME_COLOR:0;
+        int hit=y>=design::button_top?UI_HOME_WIFI:(x>=74&&x<394&&y>=160&&y<232)?UI_HOME_BREW:(x>=74&&x<394&&y>=248&&y<320)?UI_HOME_COLOR:0;
         return hit&&ui_enabled(s,hit,u)?hit:0;
     }
     return y>=design::button_top&&ui_enabled(s,1,u)?1:0;
@@ -264,38 +259,6 @@ static void small_metric(const char *value,const char *unit,int x,int y,uint32_t
 void ui_draw(const cw_flow_t &s,const UiState &u) {
     c=&board_canvas();c->fillScreen(BG);cu=&u;
     battery(u);
-    if(u.firmware_open) {
-        const auto &v=u.firmware_update;
-        c->drawRoundRect(148,64,172,36,14,LINE);text("Back",234,82,18,ACCENT);
-        text("Firmware",234,131,40);
-        char current[48];snprintf(current,sizeof current,"Installed %s",u.firmware_current);
-        text(current,234,177,20,MUTED,330);
-#if CONFIG_CW_LAUNCHER_APP
-        text("Updates via ESP Hub",234,250,30,ACCENT);
-        return;
-#endif
-        text(v.version[0]?v.version:"Coffee Watch",234,222,34,v.version[0]?ACCENT:FG,330);
-        const char *status="Choose Check update";
-        switch(v.state) {
-        case FIRMWARE_UPDATE_CHECKING:status="Checking GitHub Release";break;
-        case FIRMWARE_UPDATE_AVAILABLE:status="New firmware available";break;
-        case FIRMWARE_UPDATE_CURRENT:status="Already up to date";break;
-        case FIRMWARE_UPDATE_DOWNLOADING:status="Writing the inactive slot";break;
-        case FIRMWARE_UPDATE_READY:status="Download verified";break;
-        case FIRMWARE_UPDATE_CANCELLED:status="Update cancelled";break;
-        case FIRMWARE_UPDATE_ERROR:status=v.error==ESP_ERR_NOT_SUPPORTED?"First USB migration required":"Update failed; retry when ready";break;
-        case FIRMWARE_UPDATE_ACTIVATING:status="Restarting";break;
-        default:break;
-        }
-        text(u.firmware_notice[0]?u.firmware_notice:status,234,270,20,MUTED,340);
-        if(v.state==FIRMWARE_UPDATE_ERROR)fmt(234,304,18,MUTED,"Status 0x%x",(unsigned)v.error);
-        if(v.state==FIRMWARE_UPDATE_DOWNLOADING) {
-            stability_bar(v.total_bytes?(float)v.received_bytes/v.total_bytes:0);
-            fmt(234,337,18,MUTED,"%u / %u KiB",(unsigned)((v.received_bytes+1023)/1024),(unsigned)((v.total_bytes+1023)/1024));
-        } else text(v.state==FIRMWARE_UPDATE_READY?"Confirm to restart and install":"Updates need at least 30% battery",234,337,18,MUTED,330);
-        const char *label=v.busy?"Cancel":v.state==FIRMWARE_UPDATE_READY?"Restart & install":v.state==FIRMWARE_UPDATE_AVAILABLE?"Download":"Check update";
-        bottom(label,u.firmware_primary_enabled,u.held==1);return;
-    }
     if(!u.wifi_setup&&u.record_visible&&(s.stage==CW_TDS||s.stage==CW_REPORT)) {
         char failed[56];snprintf(failed,sizeof failed,"Dropbox: %s",u.record.error[0]?u.record.error:"save failed");
         const char *label=u.record.state==CW_RECORD_SAVING?"Dropbox: saving":u.record.state==CW_RECORD_SAVED?"Dropbox: saved":failed;
@@ -323,8 +286,6 @@ void ui_draw(const cw_flow_t &s,const UiState &u) {
     }
     if(u.home) {
         // Home: the first device to connect picks the product; a connected one is also a choice.
-        c->drawRoundRect(148,64,172,36,14,u.held==UI_HOME_FIRMWARE?ACCENT:LINE);
-        text("Firmware",234,82,18,ACCENT);
         text("Connect scale or color sensor",234,118,design::type::body,MUTED);
         struct Tile {const char *label,*on,*off;bool enabled;int action,top;};
         const Tile tiles[]={{"Brew",u.home_scales[0]?u.home_scales:"Scale connected","Searching for scale",u.home_scale,UI_HOME_BREW,160},

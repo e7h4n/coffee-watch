@@ -21,7 +21,7 @@ watch. First migration needs explicit approval, guarded private full-flash/NVS/P
 backups, compatibility checks, and four narrowly scoped USB writes. It is not
 atomic and the first USB boot cannot roll back the old layout. Read
 [firmware update and USB recovery](../../spec/firmware-update.md) before any write.
-Later updates use Home → Firmware → Download → Restart & install. PR CI provides
+PR CI provides
 a versioned candidate ZIP; only `main` publishes a public GitHub Release.
 
 An ignored existing `sdkconfig` overrides `sdkconfig.defaults`. Build with a clean
@@ -108,8 +108,6 @@ These primary product rules are evaluated only when weight notifications arrive;
   without sending a duplicate stop or fabricating another completion.
 - Hold both keys 900ms on any page: Home (ends the brew session or leaves roast
   color). Chord consumes short actions. Next held on the brewer carousel is Home too.
-  Exception: the firmware modal cancels a busy updater and waits for worker
-  acknowledgement before releasing Dropbox admission or returning Home.
 - Reports ignore short physical presses; swipe or long Home/Back only.
 - Scale loss interrupts the current brew and clears the stability window. Long
   Home begins a new session; reconnect never automatically resumes old brewing.
@@ -121,10 +119,7 @@ RS source. Missing events remain pending until explicit cancellation/Home.
 ## Development console
 
 `status`, `screen`, `home`, `next`, `select`, `back`, `mode`, `open brew` and
-`open color` are diagnostic commands. `update status`, `update open`, and
-`update cancel` use the same protected updater; no serial command bypasses its
-explicit install confirmation, idle/battery or pending-upload checks.
-They invoke the same UI actions; there is no command to inject a measurement.
+`open color` are diagnostic commands. `update status` reports updater state.
 `screen` emits SCREEN565/PX rows for inspecting the real framebuffer. Capture
 with `tools/ble_capture.py --quiet-rx --quiet-pixels` to suppress raw screen rows
 in the terminal while preserving them in the log. Keep a single serial session.
@@ -168,7 +163,6 @@ On every screen, 10 minutes without touch/button interaction or a state change
 powers off StopWatch through M5PM1. Page/session, scale phase, connection and
 interruption transitions restart the interval. Weight notifications, timer display
 updates, rendering and diagnostic status reads do not keep the device awake.
-A busy firmware check/download suppresses idle shutdown until its worker is idle.
 
 ## Shared visuals and motion
 
