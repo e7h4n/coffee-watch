@@ -1,4 +1,14 @@
 dependencies:
+  espressif/cmake_utilities:
+    component_hash: afc935d5a93cda71ce3223b817de128d07484439d585e6fe613bde820e17f36a
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=4.1'
+    source:
+      registry_url: https://components.espressif.com
+      type: service
+    version: 1.4.1
   espressif/esp_codec_dev:
     component_hash: 0d9e9bc288156eb55f79338d312e1ebf8c9dfbd5e7d13ef0f20ccb031b4e15cf
     dependencies:
@@ -9,12 +19,26 @@ dependencies:
       registry_url: https://components.espressif.com/
       type: service
     version: 1.5.4
+  espressif/i2c_bus:
+    component_hash: 483112c1619c54c38d0b734fb25f1678733267858a77b7af2f48cc7db6dbbd84
+    dependencies:
+    - name: espressif/cmake_utilities
+      registry_url: https://components.espressif.com
+      require: private
+      version: '*'
+    - name: idf
+      require: private
+      version: '>=4.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.5.2
   idf:
     source:
       type: idf
     version: 5.5.2
   okou_agent:
-    component_hash: a2c5d8962c8da41d692b267366edc5df802502ad4ee0832f5e2eef4f1c450689
+    component_hash: 01addcda80ab79b4aeeec0b5c9ec3ad35da73c49c48bd583537296480612e266
     dependencies:
     - name: idf
       version: '>=5.4'
@@ -30,10 +54,12 @@ dependencies:
       git: https://github.com/okou-ai/esphub.git
       path: firmware/components/okou_agent
       type: git
-    version: 0454db162a0ffbfeaf08b97132781e47becf830d
+    version: 48a03b746e45b5e69fea47506633f5761428cac0
 direct_dependencies:
 - espressif/esp_codec_dev
+- espressif/i2c_bus
+- idf
 - okou_agent
-manifest_hash: 84a697e18a0e7be8cfe8b8bfda008bb9442ac84392f5a614dd993849c6013f0b
+manifest_hash: 7168f1bc191d99e4fe34ad4eedc433bdabf0f36d3a15badaec168bd2ef3546db
 target: esp32s3
 version: 2.0.0
