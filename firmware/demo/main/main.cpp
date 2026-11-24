@@ -88,8 +88,8 @@ static void go_home() {
     if(ui.wifi_setup)wifi_setup_close();
     cw_home(&flow);transport_drop_rs();rs_requested=false;rs_epoch=0;
     if(!flow.scale_ready)transport_find_scale();
-    int battery=ui.battery_percent;cw_network_view_t network=ui.network;
-    ui={};ui.battery_percent=battery;ui.network=network;queue_read=queue_write=0;render_needed=true;
+    BatteryGauge battery=ui.battery;cw_network_view_t network=ui.network;
+    ui={};ui.battery=battery;ui.network=network;queue_read=queue_write=0;render_needed=true;
     ESP_LOGI("flow","Home generation=%u",flow.generation);
 }
 static void enter_color(int64_t now) {color_mode_enter(now);render_needed=true;ESP_LOGI("app","roast color");}
@@ -146,8 +146,8 @@ static void back() {
     if(flow.stage==CW_BREWER||flow.stage==CW_HOME) {go_home();return;}
     cw_back(&flow);
     transport_drop_rs();rs_requested=false;rs_epoch=0;if(!flow.scale_ready)transport_find_scale();
-    int battery=ui.battery_percent;cw_network_view_t network=ui.network;
-    ui={};ui.battery_percent=battery;ui.network=network;queue_read=queue_write=0;render_needed=true;
+    BatteryGauge battery=ui.battery;cw_network_view_t network=ui.network;
+    ui={};ui.battery=battery;ui.network=network;queue_read=queue_write=0;render_needed=true;
 }
 struct Inputs {
     bool next=false,select=false,touch=false,next_raw=false,select_raw=false;
@@ -287,16 +287,19 @@ extern "C" void app_main() {
     setvbuf(stdin,nullptr,_IONBF,0);ESP_ERROR_CHECK(nvs_flash_init());
     events=xQueueCreate(128,sizeof(demo_event_t));console_commands=xQueueCreate(4,sizeof(ConsoleCommand));configASSERT(events&&console_commands);
     cw_init(&flow);flow.brewer=saved_brewer();board_init();color_sensor_init();cw_app_init(&app);
-    probe_trace_init();ui.home=true;ui.battery_percent=board_battery_percent();ui_tick(flow,ui,now_us());ui_draw(flow,ui);board_present();
+    probe_trace_init();ui.home=true;
+    bool charging = board_battery_charging();
+    ui.battery.percent = board_battery_percent();
+    ui_tick(flow,ui,now_us());ui_draw(flow,ui);board_present();
     uint8_t mac[6];esp_read_mac(mac,ESP_MAC_WIFI_STA);char session[40];
     snprintf(session,sizeof session,"%02x%02x%02x%02x%02x%02x-%08lx%08lx",mac[0],mac[1],mac[2],mac[3],mac[4],mac[5],(unsigned long)esp_random(),(unsigned long)esp_random());cw_record_init(&records,session);color_mode_init(session);
     wifi_setup_init();ESP_ERROR_CHECK(firmware_update_init());transport_init();xTaskCreate(console_task,"console",4096,nullptr,2,nullptr);
 #if !CONFIG_CW_LAUNCHER_APP
     const int64_t health_started=now_us();bool boot_health_checked=false;
 #endif
-    ESP_LOGI("demo","coffee-watch-demo-v3; battery=%d; UI=%dx%d",ui.battery_percent,(int)board_canvas().width(),(int)board_canvas().height());
+    ESP_LOGI("demo","coffee-watch-demo-v3; battery=%d; UI=%dx%d",ui.battery.percent,(int)board_canvas().width(),(int)board_canvas().height());
     int64_t last_draw=0,last_activity=now_us(),last_battery=last_activity;
-    int battery_percent=ui.battery_percent;
+    int64_t charge_started = last_battery;
     constexpr int64_t idle_limit_us=10LL*60*1000000;
     unsigned last_generation=flow.generation;
     auto last_phase=flow.scale.phase;
@@ -348,12 +351,22 @@ extern "C" void app_main() {
                 audio_chirp();ESP_LOGI("flow","slow-drip hint seq=%u out_cg=%ld",slow_drip_seen,(long)flow.duo.out_cg);
             }
         }
-        if(now-last_battery>=1000000) {
-            last_battery=now;battery_percent=board_battery_percent();
+        if (now - last_battery >= 1000000) {
+            last_battery = now;
+            int level = board_battery_percent();
+            bool active = board_battery_charging();
+            if (level != ui.battery.percent || active != charging) {
+                ESP_LOGI("battery", "level=%d charging=%d", level, active);
+                if (active != charging || ui.battery.percent < 0) charge_started = now;
+                charging = active;
+                ui.battery.percent = level;
+                render_needed = true;
+            }
         }
-        if(ui.battery_percent!=battery_percent) {
-            ESP_LOGI("battery","level=%d",battery_percent);
-            ui.battery_percent=battery_percent;render_needed=true;
+        int blocks = ui.battery.sweep_blocks(charging, now - charge_started);
+        if (blocks != ui.battery.lit_blocks) {
+            ui.battery.lit_blocks = blocks;
+            render_needed = true;
         }
 #if !CONFIG_CW_LAUNCHER_APP
         if(!boot_health_checked&&now-health_started>=10000000) {

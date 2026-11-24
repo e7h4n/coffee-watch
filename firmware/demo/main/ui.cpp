@@ -249,10 +249,13 @@ static void highlights(const cw_flow_t &s,int y) {
 // Fixed top-center telemetry, outside page-entry motion.
 static void battery(const UiState &u) {
     float page_enter=enter;enter=1;
-    uint32_t battery_color=u.battery_percent>=0&&u.battery_percent<=15?ACCENT:MUTED;
+    uint32_t battery_color=u.battery.percent>=0&&u.battery.percent<=15?ACCENT:MUTED;
     c->drawRoundRect(195,24,28,14,3,battery_color);c->fillRect(224,28,3,6,battery_color);
-    if(u.battery_percent>=0)c->fillRect(198,27,22*u.battery_percent/100,8,battery_color);
-    if(u.battery_percent>=0)fmt(254,31,20,battery_color,"%d%%",u.battery_percent);
+    u.battery.draw_fill([&](int offset, int width, bool sweep) {
+        uint32_t sweep_color = battery_color == ACCENT ? MUTED : ACCENT;
+        c->fillRect(198 + offset, 27, width, 8, sweep ? sweep_color : battery_color);
+    });
+    if(u.battery.percent>=0)fmt(254,31,20,battery_color,"%d%%",u.battery.percent);
     else text("--%",254,31,20,battery_color);
     enter=page_enter;
 }
