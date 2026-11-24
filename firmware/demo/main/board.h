@@ -11,3 +11,4 @@ void board_shutdown();
 void board_speaker_enable(bool enabled);
 // Estimated percentage from M5PM1 voltage, or -1 on read failure.
 int board_battery_percent();
+bool board_battery_charging();

@@ -135,6 +135,7 @@ public:
 static M5StopWatch display;
 static LGFX_Sprite canvas(&display);
 static M5PM1 pmic;
+static bool charge_input_ready;
 static M5IOE1 ioe;
 static i2c_master_dev_handle_t touch;
 static void delay_ms(unsigned ms) {vTaskDelay(pdMS_TO_TICKS(ms));}
@@ -146,6 +147,10 @@ void board_init() {
     configASSERT(pmic.setI2cSleepTime(0)==M5PM1_OK);
     configASSERT(pmic.wdtSet(0)==M5PM1_OK);
     pmic.ldoSetPowerHold(true);pmic.setSingleResetDisable(true);pmic.setLedEnLevel(false);
+    // StopWatch PMG2 is the charger's active-low status output.
+    charge_input_ready = pmic.gpioSetFunc(M5PM1_GPIO_NUM_2, M5PM1_GPIO_FUNC_GPIO) == M5PM1_OK
+        && pmic.gpioSetMode(M5PM1_GPIO_NUM_2, M5PM1_GPIO_MODE_INPUT) == M5PM1_OK
+        && pmic.gpioSetPull(M5PM1_GPIO_NUM_2, M5PM1_GPIO_PULL_NONE) == M5PM1_OK;
     configASSERT(ioe.begin(bus,0x4f,M5IOE1_I2C_FREQ_400K)==M5IOE1_OK);
     configASSERT(ioe.setI2cSleepTime(0)==M5IOE1_OK);
     for(int pin: {M5IOE1_PIN_8,M5IOE1_PIN_4,M5IOE1_PIN_5}) {
@@ -211,4 +216,11 @@ int board_battery_percent() {
     // The official 800 mV span gives 0% at 3300 mV and 100% at 4100 mV.
     int level=(static_cast<int>(mv)-3300)*100/800;
     return level<0?0:level>100?100:level;
+}
+
+bool board_battery_charging() {
+    uint16_t vin_mv = 0;
+    uint8_t status = 1;
+    return charge_input_ready && pmic.readVin(&vin_mv) == M5PM1_OK && vin_mv > 4000
+        && pmic.gpioGetInput(M5PM1_GPIO_NUM_2, &status) == M5PM1_OK && status == 0;
 }

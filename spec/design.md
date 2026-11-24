@@ -32,10 +32,12 @@ animation never interpolates a measurement.
 
 Every page displays a battery outline and percentage at the top center, y=31.
 Reserve y=20..44; progress is displayed below the main number.
-Following the official StopWatch UserDemo, sample M5PM1 `readVbat` every second,
-filter voltage with 7/8 old + 1/8 new and rounded division, then map 3300..4200mV
-linearly to 0..100%, clamped. This is a voltage-based estimate, not a fuel gauge.
-Read errors show --% instead of inventing a value. Battery updates do not change
+Sample M5PM1 battery voltage once per second. Map 3300..4100 mV linearly to
+0..100%, clamped, and show --% if the reading fails. The solid fill and number
+track that estimate. With VIN above 4 V and PMG2 (CHG_STAT) low, light the
+remaining space from left to right in blocks every 320 ms. After the last block,
+clear the sweep and repeat. Full, unplugged, and unknown readings stay static.
+Battery updates do not change
 business state or reset the 10-minute idle timer. No other device is queried.
 
 ## Components
