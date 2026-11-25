@@ -11,7 +11,7 @@
 
 /* Identifies the managed native application in the USB installation package. */
 static const char coffee_watch_profile[] __attribute__((used, section(".rodata_custom_desc"), aligned(4))) =
-    "coffee-watch/native/stopwatch";
+    "coffee-watch/native/" CONFIG_OKOU_BOARD_PROFILE;
 
 static const char *TAG = "launcher_app";
 

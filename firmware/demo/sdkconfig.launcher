@@ -22,4 +22,4 @@ CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y
 # the ~5.5 KB the websocket task needs): non-ISR FreeRTOS functions run from flash (up to 8 KB).
 CONFIG_FREERTOS_PLACE_FUNCTIONS_INTO_FLASH=y
 
-CONFIG_OKOU_BOARD_PROFILE="stopwatch"
+CONFIG_OKOU_BOARD_PROFILE="m5stack/stopwatch"
