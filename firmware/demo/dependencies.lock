@@ -38,7 +38,7 @@ dependencies:
       type: idf
     version: 5.5.2
   okou_agent:
-    component_hash: e1c7c6902816ab37ecb29445625f698739eb9c79cb322051c30d3cc3b6a004a2
+    component_hash: 6958a85047d4143fb8b0d22a7db0ec78e2a9e8850730fb75d909c16dda7fe650
     dependencies:
     - name: idf
       version: '>=5.4'
@@ -54,12 +54,12 @@ dependencies:
       git: https://github.com/okou-ai/esphub.git
       path: firmware/components/okou_agent
       type: git
-    version: 1877c53431c45d886914cf8ef7aded5a0f60264f
+    version: 6dacdd61561646bc90b622ca3e2200c1ab3176df
 direct_dependencies:
 - espressif/esp_codec_dev
 - espressif/i2c_bus
 - idf
 - okou_agent
-manifest_hash: e37a8ea475581d640754f8d2a619548f57769ffd9ba51dcb6a3c9befbc874ba0
+manifest_hash: d118b176ca3df36f44e2cabe057a072b8d2e279a9cac70f8a7e55e2ccb2c0b17
 target: esp32s3
 version: 2.0.0
