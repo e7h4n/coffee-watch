@@ -4,12 +4,7 @@
 CONFIG_CW_LAUNCHER_APP=y
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=n
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions-launcher.csv"
-# Full ELF SHA-256 in core dumps so esp-launcher tools/symbolize.py can match the exact ELF.
-CONFIG_APP_RETRIEVE_LEN_ELF_SHA=64
-# Crash evidence for the launcher's coredump op (coredump partition exists in the launcher layout).
-CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
-CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
-CONFIG_ESP_COREDUMP_CHECKSUM_CRC32=y
+CONFIG_ESP_COREDUMP_ENABLE_TO_NONE=y
 # Internal RAM. The launcher variant runs the okou_agent tasks (agent, Wi-Fi manager, hub
 # websocket of about 5 KB each, stacks in internal RAM) on top of BLE, the display and Dropbox
 # TLS. Without this the hub websocket task could not be created (v0.1.9). Moving the Wi-Fi hot

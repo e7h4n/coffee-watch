@@ -1,6 +1,6 @@
 dependencies:
   espressif/esp_codec_dev: "1.5.4"
   okou_agent:
-    git: https://github.com/okou-ai/esphub.git
+    git: https://github.com/okou-ai/esphub-firmware.git
     path: firmware/components/okou_agent
-    version: 6dacdd61561646bc90b622ca3e2200c1ab3176df
+    version: 6e599bd3ea1731ebef8715cd6c601fc4a6d61c54
