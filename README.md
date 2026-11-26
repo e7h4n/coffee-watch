@@ -8,7 +8,7 @@ together to calculate and present your brew data with minimal manual recording.
 
 ## ESP Hub StopWatch
 
-For a registered StopWatch running the ESP Hub launcher and fresh 4 MiB app layout, use the `esphub.json` asset in the Coffee Watch release. Check its board, version and SHA-256. With EspHub 1.1.144, enter the bootloader and pass the managed image URL from `esphub.json` to `ota.install` with `kind=native`. The bootloader writes the 4 MiB `app` partition and starts the application. Verify that the next app boot reports `coffee_watch_demo`, the release version and the selected application image. EspHub accepts the verified OTA write before the first boot. [Coffee Watch releases](https://github.com/e7h4n/coffee-watch/releases)
+For a registered M5Stack StopWatch, select the managed application in the Coffee Watch release using `esphub.json`. Verify the board, version and SHA-256. Enter the EspHub bootloader and pass the image URL to `ota.install` with `kind=app`. The bootloader writes the 4 MiB application slot. After reboot, verify that EspHub reports `coffee_watch_demo`, the expected application version and SDK `8.0.0`. [Coffee Watch releases](https://github.com/e7h4n/coffee-watch/releases)
 
 ESP Hub manages Wi-Fi on this build. Hold Select for three seconds during application startup to return to the launcher. For Dropbox authorization, open **Dropbox setup** on the watch and pair with the [Bluetooth setup page](https://e7h4n.github.io/coffee-watch/). Battery percentage uses the M5PM1 voltage and the same conversion as M5Unified’s StopWatch power API. [Official battery example](https://docs.m5stack.com/en/arduino/stopwatch/battery)
 

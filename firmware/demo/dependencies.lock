@@ -1,4 +1,22 @@
 dependencies:
+  eh_agent:
+    component_hash: a88d66aa2b9089b3bcb893a6dfc05d72081e854af2dcfd99ae3b1e1085d29be7
+    dependencies:
+    - name: idf
+      version: '>=5.4'
+    - name: espressif/cjson
+      rules:
+      - if: idf_version >=6.0
+      version: ^1.7.19
+    - name: espressif/mqtt
+      rules:
+      - if: idf_version >=6.0
+      version: ^1.0.0
+    source:
+      git: https://github.com/okou-ai/esphub-firmware.git
+      path: firmware/components/eh_agent
+      type: git
+    version: 24b53bea5481f21ae51fa051730893d3772d4ecd
   espressif/cmake_utilities:
     component_hash: afc935d5a93cda71ce3223b817de128d07484439d585e6fe613bde820e17f36a
     dependencies:
@@ -37,29 +55,11 @@ dependencies:
     source:
       type: idf
     version: 5.5.2
-  okou_agent:
-    component_hash: c83a50c333af44b95d897e448a8484433cd53676f3929eaf959d85f44b3cc04d
-    dependencies:
-    - name: idf
-      version: '>=5.4'
-    - name: espressif/cjson
-      rules:
-      - if: idf_version >=6.0
-      version: ^1.7.19
-    - name: espressif/mqtt
-      rules:
-      - if: idf_version >=6.0
-      version: ^1.0.0
-    source:
-      git: https://github.com/okou-ai/esphub-firmware.git
-      path: firmware/components/okou_agent
-      type: git
-    version: 6e599bd3ea1731ebef8715cd6c601fc4a6d61c54
 direct_dependencies:
+- eh_agent
 - espressif/esp_codec_dev
 - espressif/i2c_bus
 - idf
-- okou_agent
-manifest_hash: 8a341d5664879a9cb906167a2f05500c9ea978a3b2bfee28cd70d1d285599a1d
+manifest_hash: 1f37b9fb837873aacbd379e628e48cd493207b94bc4d642b563ee4575627d289
 target: esp32s3
 version: 2.0.0

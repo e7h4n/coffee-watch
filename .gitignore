@@ -18,3 +18,4 @@ captures/
 firmware/demo/components/M5GFX/
 firmware/demo/components/M5PM1/
 firmware/demo/components/M5IOE1/
+firmware/demo/managed_components/eh_agent/
