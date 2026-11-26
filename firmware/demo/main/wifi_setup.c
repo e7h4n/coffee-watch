@@ -6,7 +6,7 @@
 #include "launcher_app.h"
 #include "sdkconfig.h"
 #if CONFIG_CW_LAUNCHER_APP
-#include "okou_agent_ext.h"
+#include "eh_agent_ext.h"
 #include "esp_netif_sntp.h"
 #endif
 #include <stdio.h>
@@ -160,7 +160,7 @@ static void wifi_event(void *arg,esp_event_base_t base,int32_t id,void *data) {
     else return;
     configASSERT(xQueueSend(network_queue,&c,0)==pdTRUE);
 }
-#else /* CONFIG_CW_LAUNCHER_APP: the okou_agent SDK owns Wi-Fi (networks shared with esp-launcher) */
+#else /* CONFIG_CW_LAUNCHER_APP: EspHub manages the Wi-Fi networks shared with the bootloader */
 static void station_ip(char *ip,size_t n) {
     esp_netif_t *nf=esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");esp_netif_ip_info_t info;
     if(nf&&esp_netif_get_ip_info(nf,&info)==ESP_OK&&info.ip.addr)snprintf(ip,n,IPSTR,IP2STR(&info.ip));else ip[0]=0;
@@ -172,8 +172,8 @@ static void network_task(void *arg) {
     for(;;) {
         vTaskDelay(pdMS_TO_TICKS(1000));
         char ssid[33]="",ip[16]="";
-        bool up=okou_net_has_ip()&&okou_wifi_current(ssid,sizeof ssid);
-        bool saved=okou_wifi_count()>0;
+        bool up=eh_net_has_ip()&&eh_wifi_current(ssid,sizeof ssid);
+        bool saved=eh_wifi_count()>0;
         portENTER_CRITICAL(&lock);view.saved=saved;portEXIT_CRITICAL(&lock);
         if(up)station_ip(ip,sizeof ip);
         if(up&&!clock_started) {
@@ -182,7 +182,7 @@ static void network_task(void *arg) {
         }
         if(first||up!=was_up||strcmp(ssid,last_ssid)) {
             first=false;
-            network_state(up?CW_NET_CONNECTED:(okou_wifi_count()?CW_NET_CONNECTING:CW_NET_UNCONFIGURED),0,up?ssid:"",up?ip:NULL);
+            network_state(up?CW_NET_CONNECTED:(saved?CW_NET_CONNECTING:CW_NET_UNCONFIGURED),0,up?ssid:"",up?ip:NULL);
             was_up=up;snprintf(last_ssid,sizeof last_ssid,"%s",ssid);
         }
     }

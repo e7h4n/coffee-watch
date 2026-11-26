@@ -3,7 +3,6 @@ menu "Coffee Watch"
         bool "Run as an esp-launcher app (remote logs/commands; updates installed by the launcher)"
         default n
         help
-            Starts the okou_agent SDK on the app's own Wi-Fi, exposes the serial console as the
-            remote command `console`, and leaves firmware updates to esp-launcher. Requires the
-            esp-launcher partition layout (partitions-launcher.csv).
+            Starts the EspHub SDK with the bootloader's saved Wi-Fi networks and supports
+            remote logs and commands. Uses the EspHub app slot in partitions-launcher.csv.
 endmenu

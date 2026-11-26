@@ -1,11 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "sdkconfig.h"
 #include "demo.h"
-#if CONFIG_CW_LAUNCHER_APP
-#include "okou_ble.h"
-#include "esp_task_wdt.h"
-#include "freertos/task.h"
-#endif
 #include <stdio.h>
 #include <inttypes.h>
 
@@ -283,13 +278,6 @@ static void reset_host(int reason) {
 }
 static void host(void *arg) {nimble_port_run();nimble_port_freertos_deinit();}
 void transport_init(void) {
-#if CONFIG_CW_LAUNCHER_APP
-    // Boot-time Wi-Fi provisioning temporarily owns NimBLE before the scale transport.
-    while (okou_ble_host_owned()) {
-        ESP_ERROR_CHECK(esp_task_wdt_reset());
-        vTaskDelay(pdMS_TO_TICKS(100));
-    }
-#endif
     commands=xQueueCreate(8,sizeof(command_t));configASSERT(commands);
     ESP_ERROR_CHECK(nimble_port_init());wifi_setup_register();ble_npl_event_init(&command_event,execute,NULL);
     ble_hs_cfg.sync_cb=sync_host;ble_hs_cfg.reset_cb=reset_host;nimble_port_freertos_init(host);

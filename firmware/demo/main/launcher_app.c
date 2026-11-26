@@ -6,12 +6,11 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "okou_agent_ext.h"
-#include "okou_agent.h"
+#include "eh_agent.h"
 
-/* Identifies the managed native application in the USB installation package. */
+/* The OTA packager reads the board profile and linked SDK version from the image. */
 static const char coffee_watch_profile[] __attribute__((used, section(".rodata_custom_desc"), aligned(4))) =
-    "coffee-watch/native/" CONFIG_OKOU_BOARD_PROFILE;
+    "coffee-watch/native/m5stack/stopwatch\0sdk=" EH_SDK_VERSION;
 
 static const char *TAG = "launcher_app";
 
@@ -24,11 +23,7 @@ void cw_launcher_net_start(void)
         if (deadline < 3000000) deadline = 3000000;
         while (gpio_get_level(GPIO_NUM_1) == 0) {
             if (esp_timer_get_time() >= deadline) {
-                esp_err_t err = okou_nvs_set_u8(OKOU_KEY_HOLD, 1);
-                if (err == ESP_OK) {
-                    err = okou_enter_bootloader();
-                    okou_nvs_erase(OKOU_KEY_HOLD);
-                }
+                esp_err_t err = eh_enter_bootloader();
                 ESP_LOGE(TAG, "Entering bootloader: %s", esp_err_to_name(err));
                 break;
             }
@@ -36,11 +31,9 @@ void cw_launcher_net_start(void)
         }
     }
     ESP_LOGI(TAG, "Starting %s", coffee_watch_profile);
-    okou_config_t cfg = OKOU_CONFIG_DEFAULT();
-    cfg.manage_network = true; /* the SDK's Wi-Fi manager is shared with the launcher (okl/wifis) */
-    esp_err_t e = okou_agent_start(&cfg);
+    esp_err_t e = eh_agent_start();
     if (e != ESP_OK) {
-        ESP_LOGE(TAG, "okou_agent_start: %s (no network)", esp_err_to_name(e));
+        ESP_LOGE(TAG, "eh_agent_start: %s (no network)", esp_err_to_name(e));
     }
 }
 #else

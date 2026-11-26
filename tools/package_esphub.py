@@ -1,6 +1,7 @@
 """Check and describe the native Coffee Watch application for the ESP Hub StopWatch slot."""
 import hashlib
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -11,12 +12,15 @@ PROFILE = f"coffee-watch/native/{BOARD}\0".encode()
 def describe(image, version):
     if not 320 <= len(image) <= 0x400000 or image[0] != 0xE9 or image[12:14] != b"\x09\x00":
         raise ValueError("Expected an ESP32-S3 application within the 4 MiB slot")
-    if image[32:36] != bytes.fromhex("3254cdab") or not image[288:].startswith(PROFILE):
+    if image[32:36] != bytes.fromhex("3254cdab") or not image.startswith(PROFILE, 288):
         raise ValueError("Missing ESP Hub StopWatch application descriptor")
+    sdk = re.compile(rb"sdk=(\d+\.\d+\.\d+)\x00").match(image, 288 + len(PROFILE))
+    if not sdk:
+        raise ValueError("Missing EspHub SDK version in Coffee Watch application descriptor")
     built_version = image[48:80].split(b"\0", 1)[0].decode()
     if built_version != version:
         raise ValueError(f"Image version {built_version!r} differs from {version!r}")
-    return dict(board=BOARD, kind="native", native=True, version=version,
+    return dict(board=BOARD, kind="app", native=True, version=version, sdk_version=sdk[1].decode(),
                 size=len(image), sha256=hashlib.sha256(image).hexdigest(),
                 image_profile=PROFILE[:-1].decode(), app_offset=0x420000)
 
